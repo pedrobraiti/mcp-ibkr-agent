@@ -24,6 +24,11 @@ Registro de decisões com o "porquê". Append-only — não edita entradas antig
 **Motivo:** objetivo final é schedule autônomo sem navegador → OAuth. Mas OAuth da Web API para conta varejo pessoal pode exigir solicitar acesso à IBKR (e há OAuth 1.0a mais complexo), o que não pode bloquear o início. Auth atrás de `AuthPort` com adapter de Gateway garantido permite rodar desde o dia 1 e trocar para OAuth depois.
 **Alternativas consideradas:** Gateway-only (não atinge o objetivo headless); OAuth-only desde já (risco de bloqueio por liberação da IBKR).
 
+## 2026-06-21 — OAuth descartado: auth só via Gateway + tickle (revisão da decisão de auth)
+**Motivo:** pesquisa (fontes oficiais IBKR, fev/2025) confirmou que **OAuth da Web API NÃO está disponível para conta de varejo/pessoa física** — OAuth 1.0a é só institucional/terceiro registrado (processo de Compliance de 3-6 semanas); OAuth 2.0 individual está "em consideração, sem ETA". Logo, o único caminho real é **Client Portal Gateway + login manual no navegador + keep-alive `/tickle`**. O `AuthPort` continua existindo (bom design), mas só haverá o adapter de Gateway.
+**Implicações operacionais confirmadas:** sessão expira ~6min sem tickle (tickle a cada ~60s); duração máx 24h com reset à meia-noite; manutenção diária ~01:00 local derruba a sessão (agendar DCA fora disso); **1 brokerage session por username** → usar username dedicado ao bot; `GET /iserver/accounts` obrigatório antes de operar; rate limit 10 req/s no gateway; conta live precisa estar aberta/fundeada/IBKR Pro mesmo p/ usar só o paper.
+**Alternativas consideradas:** OAuth headless (era o alvo — agora inviável p/ varejo).
+
 ## 2026-06-21 — Escopo = paper primeiro + trava dura para live
 **Motivo:** segurança. Opera de fato na conta paper `U24235856`. `live` existe atrás de flag explícita, com dry-run como padrão, confirmação obrigatória e limite de valor.
 **Alternativas consideradas:** só leitura/simulação primeiro (lento demais); paper-only sem caminho p/ live (não atende objetivo final).

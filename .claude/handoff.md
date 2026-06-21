@@ -4,31 +4,31 @@
 > de forma relativamente detalhada. É o PRIMEIRO arquivo que a próxima sessão lê.
 > Mantenha-o vivo e específico — detalhado o bastante para retomar sem reconstruir o raciocínio.
 
-**Última atualização:** 2026-06-21 (scaffold + domínio prontos)
+**Última atualização:** 2026-06-21 (adapter CPAPI completo)
 
 ## Onde parei
-Setup feito e repo público no ar (`pedrobraiti/mcp-ibkr-agent`). Scaffold montado:
-- `.venv` com Python 3.12.10, `pyproject.toml` (deps: mcp, httpx, pydantic, pydantic-settings, python-dotenv; dev: pytest, pytest-asyncio, ruff, respx).
-- Estrutura hexagonal em `src/ibkr_agent/`: `domain/`, `adapters/`, `safety/`, `server/`.
-- **Domínio pronto:** `domain/models.py` (OrderRequest com regra "exatamente um entre quantity e cash_qty", Quote, Position, AccountSummary, OrderResult, enums) e `domain/ports.py` (BrokerPort, MarketDataPort, AuthPort como Protocols async).
-- `tests/test_order_request.py` — 5 testes passando.
-Tudo commitado.
+Adapter CPAPI inteiro implementado e testado (11 testes passando, ruff limpo). Pronto:
+- `config.py` — Settings via pydantic-settings (CPAPI, modo paper/live, dry-run, max_order_value, tickle).
+- `adapters/cpapi/client.py` — httpx async; base_url normalizado com barra final + endpoint sem barra inicial (senão httpx descarta `/v1/api`); `verify=False`; erros em `CpapiError`.
+- `adapters/cpapi/auth.py` — `GatewayAuth` (AuthPort): status, ssodh/init quando connected-mas-não-auth, tickle, `/iserver/accounts`.
+- `adapters/cpapi/market_data.py` — `CpapiMarketData` (MarketDataPort): resolve_conid (filtra US, com cache), get_quote (warmup duplo do snapshot, fields 31/84/86), get_account_summary, get_positions (paginado).
+- `adapters/cpapi/broker.py` — `CpapiBroker` (BrokerPort): place_order (monta cashQty OU quantity + cOID idempotente), **loop de reply com allow-list** (default só `o354`; warning desconhecido BLOQUEIA), cancel_order, get_live_orders.
+Tudo commitado e no GitHub.
 
 ## Contexto mental
-Arquitetura travada (ver `.claude/decisions.md`): CPAPI + cashQty, hexagonal, OAuth-alvo/Gateway-fallback, paper+trava live. O domínio é puro e não depende da API. O próximo bloco (adapter CPAPI) depende de detalhes concretos da API da IBKR que eu NÃO quero chutar — por isso mandei ao usuário um prompt de pesquisa (canal de pesquisa profunda, ver CLAUDE.md) cobrindo: payload exato do POST de ordem com cashQty, fluxo de reply de confirmação de ordem da CPAPI, mecânica de sessão/keep-alive `/tickle` e auth do Gateway, e o "aquecimento" do snapshot de market data.
+Arquitetura travada (ver `.claude/decisions.md`). **OAuth foi DESCARTADO** — IBKR não libera p/ varejo; auth é só Gateway+tickle. Decisões críticas do adapter vieram do relatório de pesquisa da CPAPI: endpoint de ordem é `POST /iserver/account/{acct}/orders` com array `orders`; resposta costuma ser pergunta de precaução → `POST /iserver/reply/{id}` `{"confirmed":true}` em loop; snapshot e `/iserver/account/orders` precisam de chamada dupla (warmup); `/iserver/accounts` obrigatório antes de operar; rate limit 10 req/s; manutenção diária ~01:00; username dedicado (competing session).
 
 ## Próximo passo concreto
-Quando o relatório de pesquisa da CPAPI chegar: implementar `adapters/cpapi/` (client httpx async) satisfazendo os três ports, começando por AuthPort (Gateway + /tickle) e MarketDataPort (resolve_conid, get_quote, get_account_summary, get_positions), depois BrokerPort (place_order com quantity|cashQty + tratamento do reply de confirmação, cancel_order, get_live_orders). Enquanto o relatório não chega, dá p/ adiantar a camada `safety/` (paper/live, dry-run, limite MAX_ORDER_VALUE) e o esqueleto do `server/` MCP com um adapter fake p/ testar as tools.
+Implementar `safety/` (camada que envolve o BrokerPort): bloquear live a menos que `trading_allow_live=true`; `dry_run` por padrão (não envia ordem, retorna OrderResult com dry_run=true); recusar ordem acima de `max_order_value` (p/ cashQty é direto; p/ quantity precisa do preço via MarketDataPort → calcular notional); checar RTH (fracionário só em pregão). Depois: `server/` MCP (verificar SDK `mcp` no Context7 antes de escrever) e o wiring a partir de Settings com loop de tickle em background.
 
 ## Em aberto / armadilhas
-- Detalhes da CPAPI a confirmar via pesquisa (acima) — não implementar o adapter no chute.
-- OAuth retail pode exigir liberação da IBKR → manter Gateway como fallback.
-- Validar no paper se "Trade in Fractions" espelha da live e se cashQty funciona em paper.
-- Snapshot de market data da CPAPI costuma vir vazio na 1ª chamada (aquecer/repetir).
-- Repo PÚBLICO: nunca commitar segredo; só `.env.example` sem valores. Credenciais reais ficam no `.env` local (gitignored), reaproveitadas do quick_invest.
+- Nomes de campo de `/portfolio/{acct}/summary` e `/positions` podem variar por conta → VALIDAR no paper e fixar.
+- Validar no paper: permissão "Trade in Fractions" espelhada, cashQty funcionando, e qual nível de market data a conta tem (afeta warning o354).
+- allow-list de reply: hoje só `o354`. Ao testar no paper, mapear quais outros warnings são benignos antes de adicioná-los.
+- Repo PÚBLICO: segredos só no `.env` local (gitignored).
 
 ## Como retomar rápido
-- Ler `.claude/decisions.md` (porquês) e `.claude/todo.md` (plano).
-- Rodar testes: `.venv/Scripts/python.exe -m pytest -q`.
-- Referência de código CPAPI (a reescrever limpo): `G:\Meu Drive\vscode\quick_invest\services\ib_service.py`.
-- Ativar venv (Windows/PowerShell): `& ".venv\Scripts\Activate.ps1"` (se erro de policy: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`).
+- Rodar testes: `.venv/Scripts/python.exe -m pytest -q` | lint: `.venv/Scripts/python.exe -m ruff check .`
+- Estrutura: `src/ibkr_agent/{domain,adapters/cpapi,safety,server}/`.
+- Referência (legado, já reescrito): `G:\Meu Drive\vscode\quick_invest\services\ib_service.py`.
+- Relatórios de pesquisa (CPAPI + fracionário) estão no histórico desta conversa — se precisar de mais pesquisa, escrever prompt p/ o usuário (ver CLAUDE.md).
