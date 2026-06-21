@@ -6,6 +6,18 @@
 
 **Última atualização:** 2026-06-21 (VALIDADO contra a conta real)
 
+## ▶️ AO RECEBER "continue" (runbook de inicialização — FAZER ISTO PRIMEIRO)
+O usuário vai só mandar "continue". Eu (agente) executo automaticamente, nesta ordem:
+1. **Conferir se o gateway já está no ar:** `curl -sk --max-time 3 https://localhost:5000/v1/api/one/user -o /dev/null -w "%{http_code}"`. Se voltar `000`, **subir o gateway eu mesmo** (background):
+   `cd "C:/Users/ACS Gamer/Documents/vscode-local/ibkr-gateway" && ./bin/run.bat root/conf.yaml` (run_in_background) e esperar a porta responder (HTTP 401 = no ar, esperando login).
+2. **Conferir autenticação:** `.venv/Scripts/python.exe -m ibkr_agent.healthcheck`. Se disser "Sessao nao autenticada":
+   - **PEDIR AO USUÁRIO para logar** (única coisa que EU NÃO posso fazer — é navegador + 2FA): abrir `https://localhost:5000` em **aba anônima**, conta **real**, **IBKR Mobile deslogado** (sessão concorrente trava). Esperar ele dizer "logado".
+   - Se travar no 2FA, ver receita em [[ibkr-gateway-login]] (restart limpo do gateway + aba anônima + sem sessão concorrente; Challenge/Response se push falhar).
+3. **Depois do login:** rodar o healthcheck de novo p/ confirmar `authenticated:true`, e então seguir o "Próximo passo concreto" abaixo.
+4. As tools do MCP `ibkr` já estão disponíveis nesta sessão nova (foi registrado ontem) — usar direto (session_status, market_status, get_quote, account_summary, positions, buy, sell...).
+
+OBS: o gateway pode ter caído (PC desligou / manutenção ~01:00 ET / sessão de 24h expirou) — por isso quase sempre vou precisar subir o gateway E pedir o login de novo. Isso é o normal da CPAPI de varejo.
+
 ## Onde parei
 Sistema **validado ponta a ponta contra a conta REAL** `U24235856` e funcionando. O healthcheck (`python -m ibkr_agent.healthcheck`) retornou: auth `authenticated:true, connected:true`; conta Pro com `supportsCashQty:true` e `supportsFractions:true`; **saldo US$8.87**; cotação AAPL 297.23; 0 posições. 19 testes passando, ruff limpo. Tudo commitado e no GitHub.
 
