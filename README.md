@@ -71,6 +71,16 @@ Veja `.env.example`. Principais chaves:
 
    Mostra versão do servidor, status de auth, flags da conta (`supportsCashQty`/`supportsFractions`), saldo e uma cotação.
 
+### Mantendo a sessão viva
+
+A sessão do gateway expira (sem `/tickle` em ~6 min; dura no máx ~24h; a manutenção diária ~01:00 a derruba) — e a IBKR **não** oferece OAuth para varejo, então a reautenticação é sempre login manual no navegador. Rode o keep-alive ao lado do uso manual ou de jobs agendados:
+
+```bash
+python -m ibkr_agent.keepalive   # ou: ibkr-keepalive
+```
+
+Ele faz `/tickle` no intervalo de `TICKLE_INTERVAL_SECONDS` e, quando a sessão cai, emite um **alerta** (`[ALERTA] Reautenticacao necessaria: ...`) avisando para relogar. Quando está apenas *connected* sem brokerage session, tenta religar sozinho (sem novo 2FA).
+
 ### Troubleshooting do login
 
 Se o navegador mostra **"Client login succeeds"** mas a API segue `authenticated:false`/`connected:false` (ou `ssodh/init` dá HTTP 500 / `no bridge`):
