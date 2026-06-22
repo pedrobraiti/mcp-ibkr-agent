@@ -1,7 +1,7 @@
-# Contribuindo
+# Contributing
 
-Obrigado pelo interesse! Este é um projeto de **encanamento de trading** — mudanças que
-afetam a execução de ordens exigem cuidado redobrado.
+Thanks for your interest! This is **trading plumbing** — changes that affect order
+execution need extra care.
 
 ## Setup
 
@@ -12,21 +12,23 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-## Antes de abrir um PR
+## Before opening a PR
 
-- `ruff check .` (lint) e `pytest -q` (testes) precisam passar — o CI roda os dois.
-- Cubra com testes qualquer lógica nova. Os testes rodam **sem rede** (respx/fakes),
-  então não dependem do gateway nem da conta.
-- **Nunca** inclua segredos, account ids reais ou dados de conta em código, testes ou logs.
+- `ruff check .` (lint) and `pytest -q` (tests) must pass — CI runs both.
+- Cover any new logic with tests. The suite runs **offline** (respx/fakes), so it
+  does not need the gateway or an account.
+- **Never** include secrets, real account ids, or account data in code, tests, or
+  logs.
 
-## Estilo
+## Style
 
-- Commits no padrão [Conventional Commits](https://www.conventionalcommits.org/):
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
   `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`.
-- Mensagens no imperativo, explicando o **porquê** quando não for óbvio.
+- Imperative mood; explain the **why** when it isn't obvious.
 
-## Arquitetura
+## Architecture
 
-Hexagonal (ports & adapters): trocar/estender broker ou fonte de dados vive em
-`adapters/` + `server/services.py`; o domínio (`domain/`) não conhece a IBKR.
-Veja o [README](README.md) para o panorama.
+Hexagonal (ports & adapters): swapping/extending the broker or the data source
+lives in `adapters/` + `server/services.py`; the domain (`domain/`) does not know
+about IBKR. See the [README](README.md) for the overview and
+[DECISIONS.md](DECISIONS.md) for the rationale.

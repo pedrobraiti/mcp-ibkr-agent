@@ -1,23 +1,25 @@
-# Política de Segurança
+# Security Policy
 
-Este projeto executa **ordens reais** em uma conta de corretora (Interactive Brokers).
-Trate-o com o cuidado correspondente.
+This project places **real orders** in a brokerage account (Interactive Brokers).
+Treat it with the corresponding care.
 
-## Segredos e credenciais
-- **Nunca** versione o arquivo `.env` (já está no `.gitignore`). Ele contém o ID da
-  conta e configuração sensível. O `.env.example` (sem valores) é o que vai no repo.
-- Não há chaves de API da IBKR no código: a autenticação é por **login manual** no
-  Client Portal Gateway (sessão local). Não cole tokens/cookies de sessão em issues.
-- Antes de abrir issue ou PR, confira que nenhum log colado contém account id, saldos
-  ou identificadores de ordem reais.
+## Secrets and credentials
+- **Never** commit the `.env` file (it is already in `.gitignore`). It holds the
+  account id and sensitive configuration. The committed file is `.env.example`
+  (keys only, no values).
+- There are no IBKR API keys in the code: authentication is a **manual login** to
+  the Client Portal Gateway (a local session). Do not paste session tokens/cookies
+  into issues.
+- Before opening an issue or PR, make sure no pasted log contains a real account
+  id, balances, or order identifiers.
 
-## Padrões de segurança do código
-- `paper`/dry-run por padrão; `live` exige `TRADING_ALLOW_LIVE=true` explícito.
-- Limite de valor por ordem (`MAX_ORDER_VALUE`) e checagem de horário de pregão (RTH).
-- Warnings de confirmação desconhecidos **bloqueiam** a ordem (não auto-confirmam).
+## Code safety defaults
+- `paper`/dry-run by default; `live` requires an explicit `TRADING_ALLOW_LIVE=true`.
+- Per-order value limit (`MAX_ORDER_VALUE`) and a trading-hours (RTH) check.
+- Unknown confirmation warnings **block** the order (they are not auto-confirmed).
 
-## Reportando uma vulnerabilidade
-Em vez de abrir uma issue pública, use os
+## Reporting a vulnerability
+Instead of opening a public issue, use GitHub
 [Security Advisories](https://github.com/pedrobraiti/mcp-ibkr-agent/security/advisories/new)
-do GitHub (divulgação privada). Descreva o impacto e como reproduzir. Retornarei assim
-que possível.
+(private disclosure). Describe the impact and how to reproduce it. I'll respond as
+soon as I can.

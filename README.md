@@ -3,135 +3,138 @@
 [![CI](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-validado%20ao%20vivo-success)
+![Status](https://img.shields.io/badge/status-live--validated-success)
 
-Servidor **MCP** que dá a um agente de IA (como o Claude Code) a capacidade de operar na **Interactive Brokers**: consultar cotações, saldo, posições e ordens, e **comprar/vender** — inclusive **ações fracionárias por valor em dólar** (`cashQty`) via Client Portal API.
+An **MCP server** that gives an AI agent (like Claude Code) the ability to trade on **Interactive Brokers**: quotes, balance, positions and orders, and **buy/sell** — including **fractional shares by dollar amount** (`cashQty`) via the Client Portal API.
 
-A *decisão* de investimento (o que/quando comprar ou vender) fica com você e com o prompt da sua skill. Este projeto entrega só o **encanamento de trading confiável** — com travas de segurança por padrão.
+The investment *decision* (what/when to buy or sell) stays with you and your skill's prompt. This project delivers only the **reliable trading plumbing** — with safety guards on by default.
 
-> ⚠️ **Não é aconselhamento financeiro.** Opera em conta *paper* por padrão; operação *live* exige destravar explicitamente. Use por sua conta e risco.
+> ⚠️ **Not financial advice.** Runs against a *paper* account by default; *live* trading requires explicit opt-in. Use at your own risk.
 
-## Arquitetura
+## Architecture
 
-Hexagonal (ports & adapters). O agente fala só com as tools do MCP; as travas de
-segurança ficam no caminho de toda ordem; a IBKR é um detalhe de adapter:
+Hexagonal (ports & adapters). The agent talks only to the MCP tools; the safety guards sit on the path of every order; IBKR is an adapter detail:
 
 ```mermaid
 flowchart LR
-    A["Agente IA<br/>(skill /invest)"] -->|tools MCP| B["Servidor MCP<br/>(FastMCP)"]
-    B --> C["GuardedBroker<br/>(travas de segurança)"]
+    A["AI agent<br/>(/invest skill)"] -->|MCP tools| B["MCP server<br/>(FastMCP)"]
+    B --> C["GuardedBroker<br/>(safety guards)"]
     B --> D["MarketData"]
-    C --> E["Adapters CPAPI"]
+    C --> E["CPAPI adapters"]
     D --> E
     E -->|REST localhost:5000| F["IBKR Client<br/>Portal Gateway"]
     F --> G["Interactive Brokers"]
 ```
 
 ```
-domain/      modelos (OrderRequest com quantity OU cash_qty) e portas (Broker/MarketData/Auth)
-adapters/    cpapi/ — implementação sobre a IBKR Client Portal API (REST)
-safety/      GuardedBroker — travas: live lock, dry-run, limite de valor, horário de pregão
-server/      servidor MCP (FastMCP) + composição das dependências
+domain/      models (OrderRequest with quantity OR cash_qty) and ports (Broker/MarketData/Auth)
+adapters/    cpapi/ — implementation over the IBKR Client Portal API (REST)
+safety/      GuardedBroker — guards: live lock, dry-run, value limit, trading hours
+server/      MCP server (FastMCP) + dependency composition
 ```
 
-Trocar/estender o broker no futuro (ex.: um adapter de dados em `ib_async`) é mexer só em `adapters/` + `server/services.py`.
+Swapping/extending the broker later (e.g. an `ib_async` data adapter) means touching only `adapters/` + `server/services.py`. The reasoning behind the key choices lives in [DECISIONS.md](DECISIONS.md).
 
-## Pré-requisitos
+## Why fractional matters
+
+Most retail trading APIs force you into whole shares. This project leans on the IBKR Client Portal API's `cashQty` field, which lets you buy by **dollar amount** (e.g. "$50 of AAPL") and get a fractional position — the unlock for dollar-cost averaging, rebalancing, and small accounts. See [DECISIONS.md](DECISIONS.md) for the full rationale.
+
+## Requirements
 
 - **Python 3.12+**
-- Conta **Interactive Brokers** aberta, fundeada e do tipo **IBKR Pro** (exigência da API, mesmo para usar o paper associado).
-- **Permissão de fracionário** habilitada: Client Portal → Settings → Trading → Trading Permissions → seção Stocks → marcar **"Global (Trade in Fractions)"**.
-- **IBKR Client Portal Gateway** rodando localmente (Java 8u192+).
-- **Username dedicado ao bot**: a IBKR permite só **uma** brokerage session por username — logar no TWS/celular com o mesmo usuário derruba a sessão do gateway.
+- An **Interactive Brokers** account that is open, funded, and **IBKR Pro** (an API requirement, even to use the associated paper account).
+- **Fractional permission** enabled: Client Portal → Settings → Trading → Trading Permissions → Stocks section → check **"Global (Trade in Fractions)"**.
+- **IBKR Client Portal Gateway** running locally (Java 8u192+).
+- **A dedicated username for the bot**: IBKR allows only **one** brokerage session per username — logging into TWS/mobile with the same user kills the gateway session.
 
-## Instalação
+## Installation
 
 ```bash
 git clone https://github.com/pedrobraiti/mcp-ibkr-agent.git
 cd mcp-ibkr-agent
 python -m venv .venv
-# Windows (PowerShell): & ".venv\Scripts\Activate.ps1"   (se erro de policy: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass)
+# Windows (PowerShell): & ".venv\Scripts\Activate.ps1"   (on a policy error: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass)
 # Linux/macOS:          source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env   # preencha IBKR_ACCOUNT_ID etc.
+cp .env.example .env   # fill in IBKR_ACCOUNT_ID etc.
 ```
 
-## Configuração (`.env`)
+## Configuration (`.env`)
 
-Veja `.env.example`. Principais chaves:
+See `.env.example`. Main keys:
 
-| Chave | Default | Descrição |
+| Key | Default | Description |
 |---|---|---|
-| `IBKR_API_BASE_URL` | `https://localhost:5000/v1/api` | Endpoint do Client Portal Gateway |
-| `IBKR_ACCOUNT_ID` | — | ID da conta (ex.: `DU1234567` em paper) |
-| `IBKR_TRADING_MODE` | `paper` | `paper` ou `live` |
-| `TRADING_ALLOW_LIVE` | `false` | Trava dura: `live` só opera se `true` |
-| `TRADING_DRY_RUN` | `true` | Valida mas **não envia** ordens |
-| `MAX_ORDER_VALUE` | `100.0` | Limite (US$) por ordem |
+| `IBKR_API_BASE_URL` | `https://localhost:5000/v1/api` | Client Portal Gateway endpoint |
+| `IBKR_ACCOUNT_ID` | — | Account id (e.g. `DU1234567` in paper) |
+| `IBKR_TRADING_MODE` | `paper` | `paper` or `live` |
+| `TRADING_ALLOW_LIVE` | `false` | Hard lock: `live` only trades if `true` |
+| `TRADING_DRY_RUN` | `true` | Validates but **does not send** orders |
+| `MAX_ORDER_VALUE` | `100.0` | Per-order limit (USD) |
 
-## Rodando
+## Running
 
-1. Inicie o Client Portal Gateway e faça **login no navegador** em `https://localhost:5000` (com 2FA).
-2. Registre o servidor MCP no Claude Code:
-
-   ```bash
-   claude mcp add ibkr -- /caminho/para/.venv/Scripts/python.exe -m ibkr_agent.server.app
-   ```
-
-   (ou rode direto para testar: `python -m ibkr_agent.server.app`)
-
-3. **Verifique a conexão** a qualquer momento (com o gateway logado):
+1. Start the Client Portal Gateway and **log in via the browser** at `https://localhost:5000` (with 2FA).
+2. Register the MCP server with Claude Code:
 
    ```bash
-   python -m ibkr_agent.healthcheck   # ou: ibkr-healthcheck
+   claude mcp add ibkr -- /path/to/.venv/Scripts/python.exe -m ibkr_agent.server.app
    ```
 
-   Mostra versão do servidor, status de auth, flags da conta (`supportsCashQty`/`supportsFractions`), saldo e uma cotação.
+   (or run it directly to test: `python -m ibkr_agent.server.app`)
 
-### Mantendo a sessão viva
+3. **Check the connection** anytime (with the gateway logged in):
 
-A sessão do gateway expira (sem `/tickle` em ~6 min; dura no máx ~24h; a manutenção diária ~01:00 a derruba) — e a IBKR **não** oferece OAuth para varejo, então a reautenticação é sempre login manual no navegador. Rode o keep-alive ao lado do uso manual ou de jobs agendados:
+   ```bash
+   python -m ibkr_agent.healthcheck   # or: ibkr-healthcheck
+   ```
+
+   Shows the server version, auth status, account flags (`supportsCashQty`/`supportsFractions`), balance and a quote.
+
+### Keeping the session alive
+
+The gateway session expires (without `/tickle` in ~6 min; lasts at most ~24h; daily maintenance ~01:00 drops it) — and IBKR offers **no** OAuth for retail, so reauth is always a manual browser login. Run the keep-alive alongside manual use or scheduled jobs:
 
 ```bash
-python -m ibkr_agent.keepalive   # ou: ibkr-keepalive
+python -m ibkr_agent.keepalive   # or: ibkr-keepalive
 ```
 
-Ele faz `/tickle` no intervalo de `TICKLE_INTERVAL_SECONDS` e, quando a sessão cai, emite um **alerta** (`[ALERTA] Reautenticacao necessaria: ...`) avisando para relogar. Quando está apenas *connected* sem brokerage session, tenta religar sozinho (sem novo 2FA).
+It `/tickle`s every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emits an **alert** (`[ALERTA] Reautenticacao necessaria: ...`) telling you to log back in. When it is merely *connected* without a brokerage session, it tries to recover on its own (no new 2FA).
 
-### Troubleshooting do login
+### Login troubleshooting
 
-Se o navegador mostra **"Client login succeeds"** mas a API segue `authenticated:false`/`connected:false` (ou `ssodh/init` dá HTTP 500 / `no bridge`):
+If the browser shows **"Client login succeeds"** but the API stays `authenticated:false`/`connected:false` (or `ssodh/init` returns HTTP 500 / `no bridge`):
 
-- **Reinicie o gateway limpo** (encerre o processo Java e suba de novo).
-- Logue numa **aba anônima** do Chrome (cookies antigos atrapalham).
-- **Deslogue sessões concorrentes**: IBKR Mobile e Client Portal web (1 brokerage session por username).
-- A versão antiga do *launcher* (2023) **não** é o problema — em runtime o gateway conecta no backend atual.
+- **Restart the gateway clean** (kill the Java process and start it again).
+- Log in from a **Chrome incognito tab** (stale cookies get in the way).
+- **Log out competing sessions**: IBKR Mobile and Client Portal web (one brokerage session per username).
+- The old *launcher* build (2023) is **not** the problem — at runtime the gateway connects to the current backend.
 
-## Tools expostas
+## Exposed tools
 
 `session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`.
 
-- `buy` aceita `cash_amount` (US$, fracionário via `cashQty`) **ou** `quantity` (ações, fracionário ok).
-- `sell` aceita só `quantity` (ações, fracionário ok). A IBKR **não** permite venda por valor em US$ — `cashQty` é só para compra.
-- `close_position(symbol)` fecha 100% de uma posição negociando a quantidade fracionária exata.
+- `buy` takes `cash_amount` (USD, fractional via `cashQty`) **or** `quantity` (shares, fractional ok).
+- `sell` takes only `quantity` (shares, fractional ok). IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
+- `close_position(symbol)` closes 100% of a position by trading the exact fractional quantity.
 
-## Exemplo de uso
+## Usage example
 
-Com o MCP registrado, você conversa em linguagem natural e o agente usa as tools:
+With the MCP registered, you talk in natural language and the agent uses the tools:
 
-> **Você:** *"Compre US$ 50 de AAPL."*
-> O agente chama `buy(symbol="AAPL", cash_amount=50)` — a IBKR executa uma ordem **fracionária** (≈ 0,16 ação), sem precisar pagar uma ação inteira (~US$ 300).
+> **You:** *"Buy $50 of AAPL."*
+> The agent calls `buy(symbol="AAPL", cash_amount=50)` — IBKR fills a **fractional** order (≈ 0.16 share), no need to pay for a whole share (~$300).
 
-> **Você:** *"Feche minha posição em AAPL."*
-> O agente chama `close_position(symbol="AAPL")`, que lê a quantidade exata e vende 100%.
+> **You:** *"Close my AAPL position."*
+> The agent calls `close_position(symbol="AAPL")`, which reads the exact quantity and sells 100%.
 
-Cada tool devolve um envelope `{"ok": ..., "data": ...}`. Exemplo real de uma compra fracionária executada (validada em conta IBKR ao vivo):
+Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an executed fractional buy (validated live against an IBKR account):
 
 ```json
 {
   "ok": true,
   "data": {
-    "order_id": "864501253",
+    "order_id": "8645012XX",
     "status": "filled",
     "symbol": "AAPL",
     "side": "BUY",
@@ -140,23 +143,25 @@ Cada tool devolve um envelope `{"ok": ..., "data": ...}`. Exemplo real de uma co
 }
 ```
 
-> A compra fracionária usa `cashQty` (valor em US$). Já a **venda** fracionária é por *quantidade* de ações — a IBKR não aceita `cashQty` em vendas; por isso existe `close_position`, que resolve a quantidade exata para você.
+> Fractional **buys** use `cashQty` (dollar amount). Fractional **sells** are by share *quantity* — IBKR rejects `cashQty` on sells; that's why `close_position` exists, resolving the exact quantity for you.
 
-## Segurança (padrões)
+## Safety (defaults)
 
-- **paper** por padrão; **live** bloqueado a menos que `TRADING_ALLOW_LIVE=true`.
-- **dry-run** ligado por padrão (não envia ordem de verdade).
-- Ordem acima de `MAX_ORDER_VALUE` é recusada.
-- Ordens só durante o pregão (RTH), considerando **feriados da NYSE** (via lib `holidays`).
-- Warnings de confirmação da CPAPI só são auto-aceitos via allow-list; warning desconhecido **bloqueia** a ordem.
+- **paper** by default; **live** blocked unless `TRADING_ALLOW_LIVE=true`.
+- **dry-run** on by default (no real order is sent).
+- Orders above `MAX_ORDER_VALUE` are rejected.
+- Orders only during regular trading hours (RTH), accounting for **NYSE holidays** (via the `holidays` lib).
+- CPAPI confirmation warnings are auto-accepted only through an allow-list; an unknown warning **blocks** the order.
 
-## Desenvolvimento
+## Development
 
 ```bash
-python -m pytest -q          # testes
+python -m pytest -q          # tests
 python -m ruff check .       # lint
 ```
 
-## Licença
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## License
 
 MIT.
