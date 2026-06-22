@@ -147,3 +147,31 @@ seconds (observed live). Authoritative state comes from the ledger
 "phantom" entries); `close_position` invalidates the cache before reading and, when
 no position is found, returns an honest message about the lag rather than a false
 "nothing to close".
+
+---
+
+## ADR-009 — Safety and auditability are layered, not a single check
+
+**Decision.** Trading safety is not one gate but a stack, all on the path of every
+order in `GuardedBroker`, plus a preview step and an audit trail:
+
+- **Preview before commit.** `preview_order` (IBKR `whatif`) estimates margin impact,
+  commission and warnings *without sending*, so the agent can reason about cost first.
+- **Per-order limit** (`MAX_ORDER_VALUE`) and an optional **cumulative daily cap**
+  (`MAX_DAILY_VALUE`) — many small buys can't sneak past a per-order limit.
+- **Duplicate guard.** An identical order within `DUPLICATE_WINDOW_SECONDS` is
+  rejected, so a timeout-and-retry can't double-buy.
+- **Symbol allow/deny list.** Restricts the universe the agent can touch.
+- **Audit log.** Every attempt (sent, dry-run, blocked) is appended to a local JSONL
+  journal — it answers "what did my agent do?" and is the source of truth for the
+  daily cap and the duplicate guard.
+
+**Why.** This is real money driven by an autonomous agent. Defence in depth (preview +
+multiple independent guards + a tamper-evident-ish append-only log) is what makes that
+trustworthy, and it costs little: the journal is dependency-free JSONL, the guards are
+cheap checks, and everything is testable offline.
+
+**Notes.** The daily cap and duplicate guard are computed from the journal, so they're
+naturally consistent with what was actually recorded. The `whatif` response is parsed
+defensively (best-effort fields + full `raw`) since its exact shape varies; the parsed
+fields are pending a live confirmation, the raw payload is always returned meanwhile.
