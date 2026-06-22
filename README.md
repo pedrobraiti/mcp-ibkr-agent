@@ -1,9 +1,17 @@
-# mcp-ibkr-agent
+<p align="center">
+  <img src="assets/banner.png" alt="Valet — an MCP server for Interactive Brokers" width="600">
+</p>
 
-[![CI](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-live--validated-success)
+<p align="center">
+  <strong>Valet</strong> — an MCP server that trades on Interactive Brokers, so your agent does the legwork and you make the call.
+</p>
+
+<p align="center">
+  <a href="https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml"><img src="https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
+  <img src="https://img.shields.io/badge/status-live--validated-success" alt="Status: live-validated">
+</p>
 
 An **MCP server** that gives an AI agent (like Claude Code) the ability to trade on **Interactive Brokers**: quotes, balance, positions and orders, and **buy/sell** — including **fractional shares by dollar amount** (`cashQty`) via the Client Portal API.
 
