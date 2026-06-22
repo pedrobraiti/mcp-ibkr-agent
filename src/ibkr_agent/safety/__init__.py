@@ -1,4 +1,4 @@
-"""Camada de segurança: modo paper/live, dry-run, limite de valor e horário de pregão."""
+"""Safety layer: paper/live mode, dry-run, value limit, and trading hours."""
 
 from .market_hours import is_market_open_now
 from .policy import GuardedBroker, SafetyError

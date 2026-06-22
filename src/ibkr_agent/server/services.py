@@ -1,7 +1,7 @@
-"""Composition root: monta os adapters concretos a partir das Settings.
+"""Composition root: assembles the concrete adapters from the Settings.
 
-É aqui que a injeção de dependência acontece — o resto do código depende só das
-portas. Trocar CPAPI por outro adapter no futuro é mexer só neste arquivo.
+This is where dependency injection happens — the rest of the code depends only on the
+ports. Swapping CPAPI for another adapter in the future means touching only this file.
 """
 
 from __future__ import annotations

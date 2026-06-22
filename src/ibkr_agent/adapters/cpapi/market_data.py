@@ -1,4 +1,4 @@
-"""Leitura de mercado e conta via CPAPI: conid, cotação, saldo e posições."""
+"""Market and account reads via CPAPI: conid, quote, balance and positions."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _SNAPSHOT_MAX_ATTEMPTS = 3
 
 
 class CpapiMarketData:
-    """Implementa ``MarketDataPort`` sobre a CPAPI."""
+    """Implements ``MarketDataPort`` on top of the CPAPI."""
 
     def __init__(
         self,
@@ -48,7 +48,7 @@ class CpapiMarketData:
 
         params = {"conids": str(conid), "fields": _SNAPSHOT_FIELDS}
         snapshot: dict = {}
-        # Warmup: a 1ª chamada inicia o stream e volta sem preço; repetir até vir dado.
+        # Warmup: the 1st call starts the stream and returns no price; retry until data arrives.
         for attempt in range(_SNAPSHOT_MAX_ATTEMPTS):
             data = await self._client.get("/iserver/marketdata/snapshot", params=params)
             if isinstance(data, list) and data and FIELD_LAST in data[0]:
@@ -84,17 +84,17 @@ class CpapiMarketData:
                 break
             for raw in data:
                 position = _to_position(raw)
-                if position.quantity != 0:  # a IBKR mantém linhas zeradas no cache
+                if position.quantity != 0:  # IBKR keeps zeroed-out rows in the cache
                     positions.append(position)
             page += 1
         return positions
 
     async def invalidate_positions(self) -> None:
-        """Pede ao gateway para invalidar o cache de posições (best-effort).
+        """Ask the gateway to invalidate the positions cache (best-effort).
 
-        O endpoint de posições é eventualmente-consistente: após uma ordem recente
-        ele pode demorar dezenas de segundos para refletir. Invalidar ajuda, mas não
-        garante atualização imediata — por isso não falhamos o fluxo se der erro.
+        The positions endpoint is eventually-consistent: after a recent order it
+        may take tens of seconds to reflect. Invalidating helps, but does not
+        guarantee an immediate update — so we don't fail the flow if it errors out.
         """
         try:
             await self._client.post(f"/portfolio/{self._account_id}/positions/invalidate")
@@ -111,7 +111,7 @@ def _pick_us_conid(data: dict, symbol: str) -> int | None:
         for contract in contracts:
             if contract.get("isUS") and contract.get("conid"):
                 return int(contract["conid"])
-    # Fallback: primeiro conid disponível, se nenhum marcado como US.
+    # Fallback: first available conid, if none is marked as US.
     for entry in entries:
         for contract in entry.get("contracts", []) if isinstance(entry, dict) else []:
             if contract.get("conid"):
@@ -134,7 +134,7 @@ def _to_position(raw: dict) -> Position:
 def _amount(data: dict, key: str) -> Decimal | None:
     field = data.get(key)
     raw = _to_decimal(field.get("amount")) if isinstance(field, dict) else _to_decimal(field)
-    # Valores de saldo vêm como float com ruído (ex.: 8.869999...) — arredonda p/ centavos.
+    # Balance values come as floats with noise (e.g. 8.869999...) — round to cents.
     return raw.quantize(Decimal("0.01")) if raw is not None else None
 
 

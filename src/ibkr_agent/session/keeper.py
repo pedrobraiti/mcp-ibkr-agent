@@ -1,10 +1,10 @@
-"""Keep-alive da sessão da IBKR + alerta de reautenticação.
+"""IBKR session keep-alive + reauthentication alert.
 
-A CPAPI de varejo não tem OAuth: a brokerage session do gateway expira (sem
-``/tickle`` em ~6min, dura no máx ~24h, e a manutenção diária ~01:00 derruba).
-Este componente mantém a sessão viva com ``/tickle`` e dispara um alerta quando
-ela cai e precisa de login manual no navegador — coisa que nenhum código faz
-sozinho para conta de varejo.
+The retail CPAPI has no OAuth: the gateway's brokerage session expires (without
+``/tickle`` in ~6min, lasts at most ~24h, and the daily maintenance ~01:00 drops
+it). This component keeps the session alive with ``/tickle`` and fires an alert
+when it drops and needs a manual login in the browser — something no code can do
+on its own for a retail account.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class SessionManager(Protocol):
-    """Subconjunto do AuthPort que o keeper precisa (o ``GatewayAuth`` satisfaz)."""
+    """Subset of the AuthPort that the keeper needs (``GatewayAuth`` satisfies it)."""
 
     async def status(self) -> dict: ...
     async def tickle(self) -> dict: ...
@@ -27,18 +27,19 @@ class SessionManager(Protocol):
 
 
 def _default_alert(reason: str) -> None:
-    logger.error("[ALERTA] Reautenticacao necessaria: %s", reason)
+    logger.error("[ALERT] Reauthentication required: %s", reason)
 
 
 class SessionKeeper:
-    """Mantém a sessão viva (tickle) e alerta quando ela cai.
+    """Keeps the session alive (tickle) and alerts when it drops.
 
-    Não tenta logar no navegador (impossível p/ varejo) — apenas avisa via
-    ``on_alert``. Quando está *connected* mas sem brokerage session, faz uma
-    recuperação leve (``ensure_session``), que às vezes religa sem novo 2FA.
+    Does not try to log in via the browser (impossible for retail) — it only
+    warns via ``on_alert``. When *connected* but without a brokerage session, it
+    performs a lightweight recovery (``ensure_session``), which sometimes
+    reconnects without a new 2FA.
 
-    O alerta não é repetido a cada ciclo: dispara na queda e só volta a disparar
-    a cada ``realert_every`` ciclos enquanto seguir caída.
+    The alert is not repeated every cycle: it fires on the drop and only fires
+    again every ``realert_every`` cycles while it stays down.
     """
 
     def __init__(
@@ -57,18 +58,18 @@ class SessionKeeper:
         self._cycles_since_alert = 0
 
     async def run_once(self) -> bool:
-        """Executa um ciclo de keep-alive. Retorna True se a sessão está viva."""
+        """Run one keep-alive cycle. Returns True if the session is alive."""
         try:
             status = await self._session.status()
-        except Exception as exc:  # noqa: BLE001 - qualquer falha = sessão suspeita
-            self._mark_down(f"falha ao consultar status: {exc}")
+        except Exception as exc:  # noqa: BLE001 - any failure = suspect session
+            self._mark_down(f"failed to query status: {exc}")
             return False
 
         if status.get("authenticated") and status.get("connected"):
             try:
                 await self._session.tickle()
             except Exception as exc:  # noqa: BLE001
-                self._mark_down(f"falha no tickle: {exc}")
+                self._mark_down(f"tickle failed: {exc}")
                 return False
             self._mark_up()
             return True
@@ -78,17 +79,17 @@ class SessionKeeper:
                 await self._session.ensure_session()
                 self._mark_up()
                 return True
-            except Exception:  # noqa: BLE001 - recuperação leve falhou; cai no alerta
+            except Exception:  # noqa: BLE001 - lightweight recovery failed; fall through to alert
                 pass
 
         self._mark_down(
-            "sessao caiu — faça login no Client Portal Gateway "
-            "(https://localhost:5000, com 2FA) para reautenticar."
+            "session dropped — log in to the Client Portal Gateway "
+            "(https://localhost:5000, with 2FA) to reauthenticate."
         )
         return False
 
     async def run(self, *, stop_event: asyncio.Event | None = None) -> None:
-        """Loop de keep-alive até ``stop_event``. Faz um ciclo a cada ``interval_seconds``."""
+        """Keep-alive loop until ``stop_event``. Runs one cycle every ``interval_seconds``."""
         stop_event = stop_event or asyncio.Event()
         while not stop_event.is_set():
             await self.run_once()
@@ -99,7 +100,7 @@ class SessionKeeper:
 
     def _mark_up(self) -> None:
         if self._alive is False:
-            logger.info("Sessao restabelecida.")
+            logger.info("Session re-established.")
         self._alive = True
         self._cycles_since_alert = 0
 

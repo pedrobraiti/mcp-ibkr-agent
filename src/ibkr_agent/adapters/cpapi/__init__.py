@@ -1,4 +1,4 @@
-"""Adapter da Interactive Brokers Client Portal API (CPAPI / Web API REST)."""
+"""Adapter for the Interactive Brokers Client Portal API (CPAPI / Web API REST)."""
 
 from .auth import GatewayAuth
 from .broker import CpapiBroker

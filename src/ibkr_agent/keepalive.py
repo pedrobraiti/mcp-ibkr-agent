@@ -1,9 +1,9 @@
-"""Runnable: mantém a sessão da IBKR viva e alerta quando ela cair.
+"""Runnable: keeps the IBKR session alive and alerts when it drops.
 
-    python -m ibkr_agent.keepalive      # ou: ibkr-keepalive
+    python -m ibkr_agent.keepalive      # or: ibkr-keepalive
 
-Requer o Client Portal Gateway rodando e logado. Roda até Ctrl+C. Rode-o ao lado
-do uso manual ou de jobs agendados para manter a brokerage session aquecida.
+Requires the Client Portal Gateway running and logged in. Runs until Ctrl+C. Run
+it alongside manual use or scheduled jobs to keep the brokerage session warm.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ logger = logging.getLogger("ibkr_agent.keepalive")
 
 
 def _alert(reason: str) -> None:
-    logger.error("[ALERTA] Reautenticacao necessaria: %s", reason)
+    logger.error("[ALERT] Reauthentication required: %s", reason)
     try:
-        sys.stderr.write("\a")  # bip do terminal para chamar atenção
+        sys.stderr.write("\a")  # terminal bell to grab attention
         sys.stderr.flush()
     except Exception:  # noqa: BLE001
         pass
@@ -37,7 +37,7 @@ async def _run() -> None:
         on_alert=_alert,
     )
     logger.info(
-        "Keep-alive iniciado (tickle a cada %ss). Ctrl+C para sair.",
+        "Keep-alive started (tickle every %ss). Ctrl+C to exit.",
         settings.tickle_interval_seconds,
     )
     try:
@@ -54,7 +54,7 @@ def main() -> None:
     try:
         asyncio.run(_run())
     except KeyboardInterrupt:
-        logger.info("Keep-alive encerrado.")
+        logger.info("Keep-alive stopped.")
 
 
 if __name__ == "__main__":

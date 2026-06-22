@@ -99,7 +99,7 @@ The gateway session expires (without `/tickle` in ~6 min; lasts at most ~24h; da
 python -m ibkr_agent.keepalive   # or: ibkr-keepalive
 ```
 
-It `/tickle`s every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emits an **alert** (`[ALERTA] Reautenticacao necessaria: ...`) telling you to log back in. When it is merely *connected* without a brokerage session, it tries to recover on its own (no new 2FA).
+It `/tickle`s every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emits an **alert** (`[ALERT] Reauthentication required: ...`) telling you to log back in. When it is merely *connected* without a brokerage session, it tries to recover on its own (no new 2FA).
 
 ### Login troubleshooting
 

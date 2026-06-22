@@ -1,8 +1,8 @@
-"""Servidor MCP — expõe as capacidades de trading como tools para o agente.
+"""MCP server — exposes the trading capabilities as tools for the agent.
 
-Cada tool garante a sessão (``ensure_session``) antes de operar e devolve um dict
-JSON-serializável. Erros de domínio/segurança viram ``{"ok": false, "error": ...}``
-para o agente ler em vez de quebrar.
+Each tool ensures the session (``ensure_session``) before operating and returns a
+JSON-serializable dict. Domain/safety errors become ``{"ok": false, "error": ...}``
+for the agent to read instead of breaking.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _err(exc: Exception) -> dict:
 
 @mcp.tool()
 async def session_status() -> dict:
-    """Status da sessão com o gateway da IBKR (authenticated/connected/competing)."""
+    """Status of the session with the IBKR gateway (authenticated/connected/competing)."""
     try:
         return _ok(await services().auth.status())
     except Exception as exc:  # noqa: BLE001
@@ -46,13 +46,13 @@ async def session_status() -> dict:
 
 @mcp.tool()
 async def market_status() -> dict:
-    """Indica se o mercado dos EUA está aberto (RTH) agora."""
+    """Indicates whether the US market is open (RTH) right now."""
     return _ok({"market_open": services().market_is_open()})
 
 
 @mcp.tool()
 async def get_quote(symbol: str) -> dict:
-    """Cotação atual (last/bid/ask) de um símbolo de ação dos EUA."""
+    """Current quote (last/bid/ask) for a US stock symbol."""
     svc = services()
     try:
         await svc.auth.ensure_session()
@@ -64,7 +64,7 @@ async def get_quote(symbol: str) -> dict:
 
 @mcp.tool()
 async def account_summary() -> dict:
-    """Resumo da conta: fundos disponíveis, net liquidation, buying power."""
+    """Account summary: available funds, net liquidation, buying power."""
     svc = services()
     try:
         await svc.auth.ensure_session()
@@ -76,7 +76,7 @@ async def account_summary() -> dict:
 
 @mcp.tool()
 async def positions() -> dict:
-    """Posições abertas na conta."""
+    """Open positions in the account."""
     svc = services()
     try:
         await svc.auth.ensure_session()
@@ -90,30 +90,30 @@ async def positions() -> dict:
 async def buy(
     symbol: str, cash_amount: float | None = None, quantity: float | None = None
 ) -> dict:
-    """Compra a mercado. Informe `cash_amount` (US$, fracionário via cashQty) OU
-    `quantity` (ações, fracionário ok)."""
+    """Market buy. Provide `cash_amount` (US$, fractional via cashQty) OR
+    `quantity` (shares, fractional ok)."""
     return await _place(OrderSide.BUY, symbol, cash_amount, quantity)
 
 
 @mcp.tool()
 async def sell(symbol: str, quantity: float) -> dict:
-    """Vende a mercado por `quantity` (ações, fracionário ok).
+    """Market sell by `quantity` (shares, fractional ok).
 
-    A IBKR NÃO aceita venda por valor em US$ (cashQty é só para compra). Para sair
-    de 100% de uma posição use `close_position`; para vender um valor em dólar,
-    calcule a quantidade via `get_quote`.
+    IBKR does NOT accept selling by US$ value (cashQty is buy-only). To exit
+    100% of a position use `close_position`; to sell a dollar amount,
+    compute the quantity via `get_quote`.
     """
     return await _place(OrderSide.SELL, symbol, None, quantity)
 
 
 @mcp.tool()
 async def close_position(symbol: str) -> dict:
-    """Fecha 100% da posição de um símbolo, negociando a quantidade fracionária exata.
+    """Closes 100% of a symbol's position, trading the exact fractional quantity.
 
-    Lê o tamanho exato da posição e envia a ordem oposta. Atenção: o portfolio da
-    IBKR é eventualmente-consistente — logo após uma COMPRA recente a posição pode
-    ainda não aparecer (e o fechamento retornará `closed=False`). Nesse caso, espere
-    alguns segundos e tente de novo, ou venda pela quantidade exata via `sell`.
+    Reads the exact position size and sends the opposite order. Note: IBKR's
+    portfolio is eventually-consistent — right after a recent BUY the position may
+    not appear yet (and the close will return `closed=False`). In that case, wait
+    a few seconds and try again, or sell the exact quantity via `sell`.
     """
     svc = services()
     try:
@@ -127,8 +127,8 @@ async def close_position(symbol: str) -> dict:
                 {
                     "closed": False,
                     "reason": (
-                        f"Sem posição aberta em {symbol.upper()} (lembre: o portfolio "
-                        "da IBKR pode levar dezenas de segundos para refletir uma compra recente)."
+                        f"No open position in {symbol.upper()} (remember: IBKR's "
+                        "portfolio can take tens of seconds to reflect a recent buy)."
                     ),
                 }
             )
@@ -143,7 +143,7 @@ async def close_position(symbol: str) -> dict:
 
 @mcp.tool()
 async def cancel_order(order_id: str) -> dict:
-    """Cancela uma ordem aberta pelo seu order_id."""
+    """Cancels an open order by its order_id."""
     svc = services()
     try:
         await svc.auth.ensure_session()
@@ -155,7 +155,7 @@ async def cancel_order(order_id: str) -> dict:
 
 @mcp.tool()
 async def open_orders() -> dict:
-    """Lista as ordens ativas (live orders) na conta."""
+    """Lists the active orders (live orders) in the account."""
     svc = services()
     try:
         await svc.auth.ensure_session()

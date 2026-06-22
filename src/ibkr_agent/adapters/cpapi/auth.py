@@ -1,8 +1,8 @@
-"""Autenticação via Client Portal Gateway (único caminho liberado p/ varejo).
+"""Authentication via Client Portal Gateway (the only path available for retail).
 
-Fluxo: o usuário loga manualmente no navegador (`https://localhost:5000`, com 2FA).
-Daqui cuidamos de verificar o status, reinicializar a brokerage session quando
-``connected`` mas não ``authenticated``, e manter o keep-alive via ``/tickle``.
+Flow: the user logs in manually in the browser (`https://localhost:5000`, with 2FA).
+From here we take care of checking the status, reinitializing the brokerage session
+when ``connected`` but not ``authenticated``, and keeping the keep-alive via ``/tickle``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from ..cpapi.client import CpapiClient, CpapiError
 
 
 class GatewayAuth:
-    """Implementa ``AuthPort`` sobre o Client Portal Gateway."""
+    """Implements ``AuthPort`` on top of the Client Portal Gateway."""
 
     def __init__(self, client: CpapiClient):
         self._client = client
@@ -30,7 +30,7 @@ class GatewayAuth:
             return
 
         if status.get("connected"):
-            # Conectado ao gateway mas sem brokerage session ativa: (re)inicializa.
+            # Connected to the gateway but without an active brokerage session: (re)initialize.
             await self._client.post(
                 "/iserver/auth/ssodh/init", json={"publish": True, "compete": True}
             )
@@ -40,15 +40,15 @@ class GatewayAuth:
                 return
 
         raise CpapiError(
-            "Sessão não autenticada. Faça login no Client Portal Gateway em "
-            "https://localhost:5000 (com 2FA) e tente de novo."
+            "Session not authenticated. Log in to the Client Portal Gateway at "
+            "https://localhost:5000 (with 2FA) and try again."
         )
 
     async def tickle(self) -> dict:
-        """Keep-alive da sessão. Deve ser chamado a cada ~60s. Retorna o payload do /tickle."""
+        """Session keep-alive. Should be called every ~60s. Returns the /tickle payload."""
         data = await self._client.post("/tickle")
         return data if isinstance(data, dict) else {}
 
     async def _confirm_accounts(self) -> None:
-        """`GET /iserver/accounts` é pré-requisito antes de qualquer operação de ordem."""
+        """`GET /iserver/accounts` is a prerequisite before any order operation."""
         await self._client.get("/iserver/accounts")

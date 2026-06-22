@@ -1,9 +1,9 @@
-"""Healthcheck da conexão com a IBKR.
+"""Healthcheck for the IBKR connection.
 
-Verifica se o Client Portal Gateway está logado e conectado, e imprime um relatório
-legível (versão do servidor, conta, flags de fracionário, saldo e uma cotação).
+Checks whether the Client Portal Gateway is logged in and connected, and prints a
+readable report (server version, account, fractional flags, balance and a quote).
 
-Uso: python -m ibkr_agent.healthcheck   (com o gateway rodando e logado)
+Usage: python -m ibkr_agent.healthcheck   (with the gateway running and logged in)
 """
 
 from __future__ import annotations
@@ -24,20 +24,20 @@ async def _run() -> int:
     try:
         status = await auth.status()
         server = (status.get("serverInfo") or {}).get("serverVersion", "?")
-        print(f"Servidor: {server}")
+        print(f"Server: {server}")
         print(
             f"Auth: authenticated={status.get('authenticated')} "
             f"connected={status.get('connected')} competing={status.get('competing')}"
         )
         if not status.get("authenticated"):
-            print("\n[AVISO] Sessao nao autenticada.")
-            print("   Faca login em https://localhost:5000 (com o gateway rodando) e rode de novo.")
+            print("\n[WARN] Session not authenticated.")
+            print("   Log in at https://localhost:5000 (with the gateway running) and run again.")
             return 1
 
         accounts = await client.get("/iserver/accounts")
         acct = accounts.get("selectedAccount") if isinstance(accounts, dict) else None
         props = (accounts.get("acctProps", {}) or {}).get(acct, {}) if acct else {}
-        print(f"\nConta: {acct}  (paper={accounts.get('isPaper')})")
+        print(f"\nAccount: {acct}  (paper={accounts.get('isPaper')})")
         print(
             f"  supportsCashQty={props.get('supportsCashQty')} "
             f"supportsFractions={props.get('supportsFractions')} "
@@ -47,18 +47,18 @@ async def _run() -> int:
         market = CpapiMarketData(client, acct or settings.ibkr_account_id)
         summary = await market.get_account_summary()
         print(
-            f"\nSaldo: US${summary.available_funds}  "
+            f"\nBalance: US${summary.available_funds}  "
             f"(net liq US${summary.net_liquidation}, buying power US${summary.buying_power})"
         )
 
         quote = await market.get_quote("AAPL")
         if quote:
-            print(f"Cotação AAPL: last={quote.last_price} bid={quote.bid} ask={quote.ask}")
+            print(f"AAPL quote: last={quote.last_price} bid={quote.bid} ask={quote.ask}")
 
         positions = await market.get_positions()
-        print(f"Posições abertas: {len(positions)}")
+        print(f"Open positions: {len(positions)}")
 
-        print("\n[OK] Conexao saudavel.")
+        print("\n[OK] Connection healthy.")
         return 0
     finally:
         await client.aclose()

@@ -1,4 +1,4 @@
-"""Configuração central, carregada de variáveis de ambiente / `.env`."""
+"""Central configuration, loaded from environment variables / `.env`."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain.models import TradingMode
 
-# Caminho absoluto do .env na raiz do projeto, para o servidor achá-lo independente do
-# diretório de onde for iniciado (ex.: quando o Claude Code lança o MCP).
+# Absolute path to the .env at the project root, so the server can find it regardless of
+# the directory it is started from (e.g. when Claude Code launches the MCP).
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -20,21 +20,21 @@ class Settings(BaseSettings):
         env_file=str(_ENV_FILE), env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
-    # Conexão CPAPI
+    # CPAPI connection
     ibkr_api_base_url: str = "https://localhost:5000/v1/api"
     ibkr_account_id: str = ""
     ibkr_trading_mode: TradingMode = TradingMode.PAPER
 
-    # Segurança
+    # Safety
     trading_allow_live: bool = False
     trading_dry_run: bool = True
     max_order_value: Decimal = Decimal("100")
 
-    # Sessão / rede
+    # Session / network
     tickle_interval_seconds: int = 60
     request_timeout_seconds: float = 15.0
 
-    # Mercado
+    # Market
     market_timezone: str = "America/New_York"
     market_open_time: str = "09:30"
     market_close_time: str = "16:00"

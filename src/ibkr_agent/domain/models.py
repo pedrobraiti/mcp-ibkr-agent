@@ -1,12 +1,12 @@
-"""Modelos de domínio — agnósticos ao broker concreto.
+"""Domain models — agnostic to the concrete broker.
 
-Valores monetários usam ``Decimal`` para evitar erro de ponto flutuante.
-Uma ordem é expressa por ``quantity`` (número de ações, fracionário permitido) OU
-``cash_qty`` (valor em dólar) — nunca os dois ao mesmo tempo.
+Monetary values use ``Decimal`` to avoid floating-point error.
+An order is expressed either by ``quantity`` (number of shares, fractional allowed) OR
+``cash_qty`` (dollar amount) — never both at the same time.
 
-Nota CPAPI: ``cash_qty`` (cashQty) só é aceito em COMPRAS. Para vender/fechar uma
-posição fracionária é obrigatório usar ``quantity`` fracionária (a IBKR rejeita
-cashQty em ordens de venda). Por isso ``quantity`` é ``Decimal``, não ``int``.
+CPAPI note: ``cash_qty`` (cashQty) is only accepted on BUYS. To sell/close a
+fractional position you must use a fractional ``quantity`` (IBKR rejects
+cashQty on sell orders). That is why ``quantity`` is ``Decimal``, not ``int``.
 """
 
 from __future__ import annotations
@@ -42,25 +42,25 @@ class OrderStatus(StrEnum):
 
 
 class OrderRequest(BaseModel):
-    """Pedido de ordem. Exatamente um entre ``quantity`` e ``cash_qty`` deve ser informado."""
+    """Order request. Exactly one of ``quantity`` and ``cash_qty`` must be provided."""
 
     symbol: str
     side: OrderSide
     order_type: OrderType = OrderType.MARKET
     quantity: Decimal | None = Field(
-        default=None, gt=0, description="Número de ações (fracionário permitido)."
+        default=None, gt=0, description="Number of shares (fractional allowed)."
     )
     cash_qty: Decimal | None = Field(
-        default=None, gt=0, description="Valor em US$ (fracionário via cashQty)."
+        default=None, gt=0, description="Amount in US$ (fractional via cashQty)."
     )
     limit_price: Decimal | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _exactly_one_sizing(self) -> OrderRequest:
         if (self.quantity is None) == (self.cash_qty is None):
-            raise ValueError("Informe exatamente um entre 'quantity' e 'cash_qty'.")
+            raise ValueError("Provide exactly one of 'quantity' and 'cash_qty'.")
         if self.order_type is OrderType.LIMIT and self.limit_price is None:
-            raise ValueError("Ordem LIMIT exige 'limit_price'.")
+            raise ValueError("A LIMIT order requires 'limit_price'.")
         return self
 
     @property
@@ -69,7 +69,7 @@ class OrderRequest(BaseModel):
 
 
 class OrderResult(BaseModel):
-    """Resultado do envio de uma ordem ao broker."""
+    """Result of submitting an order to the broker."""
 
     order_id: str | None = None
     status: OrderStatus = OrderStatus.UNKNOWN

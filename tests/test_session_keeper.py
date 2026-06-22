@@ -24,7 +24,7 @@ class FakeSession:
     async def ensure_session(self) -> None:
         self.ensure_calls += 1
         if not self._ensure_ok:
-            raise RuntimeError("sem brokerage session")
+            raise RuntimeError("no brokerage session")
 
 
 async def test_tickles_when_authenticated():
@@ -49,7 +49,7 @@ async def test_alerts_when_session_dead():
     assert alive is False
     assert session.tickles == 0
     assert len(alerts) == 1
-    assert "reautenticar" in alerts[0].lower()
+    assert "reauthenticate" in alerts[0].lower()
 
 
 async def test_recovers_when_connected_but_not_authenticated():
@@ -72,7 +72,7 @@ async def test_alert_is_not_spammed_every_cycle():
     for _ in range(3):
         await keeper.run_once()
 
-    # Alerta só na primeira queda; não repete nos ciclos seguintes dentro da janela.
+    # Alert only on the first drop; it does not repeat in the following cycles within the window.
     assert len(alerts) == 1
 
 
@@ -84,4 +84,4 @@ async def test_run_stops_on_event():
 
     await asyncio.wait_for(keeper.run(stop_event=stop), timeout=1)
 
-    assert session.tickles == 0  # parou antes de qualquer ciclo
+    assert session.tickles == 0  # stopped before any cycle

@@ -1,10 +1,10 @@
-"""Execução de ordens via CPAPI, com o loop de confirmação (reply) tratado.
+"""Order execution via CPAPI, with the confirmation (reply) loop handled.
 
-A CPAPI raramente aceita a ordem de primeira: ela costuma responder com perguntas
-de precaução (cada uma com `id` + `message` + `messageIds`). Precisamos confirmar
-via `POST /iserver/reply/{id}` — possivelmente em várias rodadas. Por segurança, só
-auto-confirmamos warnings cujo `messageId` está numa allow-list; qualquer warning
-desconhecido BLOQUEIA a ordem (em vez de confirmar às cegas).
+The CPAPI rarely accepts an order on the first try: it usually responds with
+precaution questions (each with `id` + `message` + `messageIds`). We need to confirm
+via `POST /iserver/reply/{id}` — possibly over several rounds. For safety, we only
+auto-confirm warnings whose `messageId` is in an allow-list; any unknown warning
+BLOCKS the order (instead of confirming blindly).
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ from decimal import Decimal
 from ...domain.models import OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType
 from .client import CpapiClient, CpapiError
 
-# Warnings benignos aceitos por padrão — confirmações de precaução padrão da CPAPI
-# para o nosso tipo de ordem (MKT + cashQty). A própria API marca todos como
-# isSuppressible=true / "Accept and Continue". Mapeados ao vivo na conta real:
-#   o354   "order without market data" (sem subscrição de dados)
-#   o10164 Market Order Confirmation (risco da ordem a mercado — usamos MKT de propósito)
-#   o10223 Confirm Mandatory Cap Price (IB pode aplicar teto/piso de proteção)
-#   o10151 disclaimer: responsabilidade do trader sobre detalhes de cash quantity
-#   o10153 Cash Quantity Order Confirmation (cashQty é simulado: cancela ao gastar o valor)
+# Benign warnings accepted by default — standard CPAPI precaution confirmations
+# for our order type (MKT + cashQty). The API itself marks them all as
+# isSuppressible=true / "Accept and Continue". Mapped live on the real account:
+#   o354   "order without market data" (no data subscription)
+#   o10164 Market Order Confirmation (market-order risk — we use MKT on purpose)
+#   o10223 Confirm Mandatory Cap Price (IB may apply a protective cap/floor)
+#   o10151 disclaimer: trader's responsibility over cash quantity details
+#   o10153 Cash Quantity Order Confirmation (cashQty is simulated: cancels once the amount is spent)
 DEFAULT_ACCEPTED_MESSAGE_IDS = frozenset(
     {"o354", "o10164", "o10223", "o10151", "o10153"}
 )
@@ -41,7 +41,7 @@ _STATUS_MAP = {
 
 
 class CpapiBroker:
-    """Implementa ``BrokerPort`` sobre a CPAPI."""
+    """Implements ``BrokerPort`` on top of the CPAPI."""
 
     def __init__(
         self,
@@ -61,7 +61,7 @@ class CpapiBroker:
     async def place_order(self, request: OrderRequest) -> OrderResult:
         conid = await self._resolve_conid(request.symbol)
         if conid is None:
-            raise CpapiError(f"Não foi possível resolver o conid de {request.symbol}.")
+            raise CpapiError(f"Could not resolve the conid for {request.symbol}.")
 
         payload = {"orders": [self._build_order(request, conid)]}
         response = await self._client.post(
@@ -85,7 +85,7 @@ class CpapiBroker:
         )
 
     async def get_live_orders(self) -> list[OrderResult]:
-        # Mesmo padrão de warmup do snapshot: a 1ª chamada instancia, a 2ª traz dados.
+        # Same warmup pattern as the snapshot: the 1st call instantiates, the 2nd brings data.
         await self._client.get("/iserver/account/orders")
         data = await self._client.get("/iserver/account/orders")
         orders = data.get("orders", []) if isinstance(data, dict) else []
@@ -117,22 +117,22 @@ class CpapiBroker:
             if not message_ids or not message_ids.issubset(self._accepted):
                 await self._decline(question["id"])
                 texts = "; ".join(question.get("message") or [])
-                ids = message_ids or "(sem id)"
+                ids = message_ids or "(no id)"
                 raise CpapiError(
-                    f"Ordem bloqueada por warning não aprovado {ids}: {texts}",
+                    f"Order blocked by unapproved warning {ids}: {texts}",
                     payload=question,
                 )
             response = await self._client.post(
                 f"/iserver/reply/{question['id']}", json={"confirmed": True}
             )
 
-        raise CpapiError("Excesso de rodadas de confirmação da CPAPI; ordem abortada.")
+        raise CpapiError("Too many CPAPI confirmation rounds; order aborted.")
 
     async def _decline(self, reply_id: str) -> None:
-        """Recusa a ordem pendente (``confirmed: false``) para não deixá-la `Inactive`.
+        """Decline the pending order (``confirmed: false``) so it isn't left `Inactive`.
 
-        Best-effort: se a recusa falhar, seguimos para levantar o erro de bloqueio —
-        o importante é não confirmar às cegas, e a recusa é só faxina.
+        Best-effort: if the decline fails, we proceed to raise the blocking error —
+        what matters is not confirming blindly, and the decline is just cleanup.
         """
         try:
             await self._client.post(f"/iserver/reply/{reply_id}", json={"confirmed": False})
@@ -154,7 +154,7 @@ class CpapiBroker:
             status=OrderStatus.REJECTED,
             symbol=request.symbol.upper(),
             side=request.side,
-            message=f"Resposta inesperada da CPAPI: {ack}",
+            message=f"Unexpected response from the CPAPI: {ack}",
             raw=ack if isinstance(ack, dict) else None,
         )
 

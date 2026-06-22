@@ -1,9 +1,9 @@
-"""Cliente HTTP de baixo nível para a CPAPI.
+"""Low-level HTTP client for the CPAPI.
 
-A CPAPI roda atrás de um gateway local com certificado autoassinado, por isso
-``verify=False``. O ``base_url`` já inclui ``/v1/api``; para o httpx concatenar
-corretamente, normalizamos o base_url com barra final e removemos a barra inicial
-do endpoint (senão o httpx descartaria o ``/v1/api``).
+The CPAPI runs behind a local gateway with a self-signed certificate, hence
+``verify=False``. The ``base_url`` already includes ``/v1/api``; for httpx to
+concatenate correctly, we normalize the base_url with a trailing slash and strip
+the leading slash from the endpoint (otherwise httpx would drop the ``/v1/api``).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import httpx
 
 
 class CpapiError(Exception):
-    """Erro de comunicação ou de negócio vindo da CPAPI."""
+    """Communication or business error coming from the CPAPI."""
 
     def __init__(self, message: str, *, status: int | None = None, payload: Any = None):
         super().__init__(message)
@@ -42,14 +42,14 @@ class CpapiClient:
         except httpx.HTTPStatusError as exc:
             payload = _safe_json(exc.response)
             raise CpapiError(
-                f"CPAPI {method} {path} falhou: HTTP {exc.response.status_code}",
+                f"CPAPI {method} {path} failed: HTTP {exc.response.status_code}",
                 status=exc.response.status_code,
                 payload=payload,
             ) from exc
         except httpx.HTTPError as exc:
             raise CpapiError(
-                f"Falha de comunicação com a CPAPI em {path}: {exc}. "
-                "O Client Portal Gateway está rodando e logado?"
+                f"Communication failure with the CPAPI at {path}: {exc}. "
+                "Is the Client Portal Gateway running and logged in?"
             ) from exc
 
         if not response.content:

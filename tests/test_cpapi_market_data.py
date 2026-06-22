@@ -30,7 +30,7 @@ async def test_resolve_conid_prefers_us_contract():
     md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
 
     assert await md.resolve_conid("aapl") == 265598
-    # 2ª chamada usa cache (não bate de novo na API).
+    # 2nd call uses the cache (doesn't hit the API again).
     assert await md.resolve_conid("AAPL") == 265598
     assert stocks.call_count == 1
     await client.aclose()
@@ -45,7 +45,7 @@ async def test_get_quote_handles_snapshot_warmup():
     )
     snapshot = respx.get(f"{BASE}/iserver/marketdata/snapshot").mock(
         side_effect=[
-            httpx.Response(200, json=[{"conid": 265598}]),  # warmup: sem preço
+            httpx.Response(200, json=[{"conid": 265598}]),  # warmup: no price
             httpx.Response(
                 200, json=[{"conid": 265598, "31": "150.25", "84": "150.20", "86": "150.30"}]
             ),

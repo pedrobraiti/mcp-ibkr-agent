@@ -1,12 +1,12 @@
-"""Horário de pregão dos EUA (regular trading hours).
+"""US regular trading hours.
 
-Fracionário só executa em RTH, e em geral não queremos disparar MKT com o mercado
-fechado. Considera dia-da-semana, janela de horário no fuso do mercado e os
-**feriados da NYSE** (via biblioteca ``holidays``).
+Fractional orders only execute during RTH, and in general we don't want to fire MKT
+orders while the market is closed. Considers the day of the week, the time window in the
+market's timezone, and the **NYSE holidays** (via the ``holidays`` library).
 
-Limitação conhecida: pregões de **fechamento antecipado** (meios-expedientes ~13:00
-ET, ex.: véspera de Natal) não são tratados — o calendário só marca fechamentos
-totais. Nesses dias a IBKR ainda barra ordens após o fechamento real.
+Known limitation: **early-close** sessions (half-days ~13:00 ET, e.g. Christmas Eve) are
+not handled — the calendar only marks full closures. On those days IBKR still rejects
+orders after the real close.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 
 import holidays
 
-# Calendário da NYSE. Gera os anos sob demanda; reusar uma instância é o padrão
-# eficiente recomendado pela própria lib.
+# NYSE calendar. Generates years on demand; reusing a single instance is the efficient
+# pattern recommended by the library itself.
 _NYSE_HOLIDAYS = holidays.NYSE()
 
 
@@ -26,8 +26,8 @@ def is_market_open_at(
     open_time: str = "09:30",
     close_time: str = "16:00",
 ) -> bool:
-    """RTH para um instante já no fuso do mercado (função pura, testável sem relógio)."""
-    if moment.weekday() > 4:  # 5=sábado, 6=domingo
+    """RTH for an instant already in the market's timezone (pure, testable without a clock)."""
+    if moment.weekday() > 4:  # 5=Saturday, 6=Sunday
         return False
     if moment.date() in _NYSE_HOLIDAYS:
         return False

@@ -1,1 +1,1 @@
-"""Servidor MCP: expõe as portas do domínio como tools para o agente."""
+"""MCP server: exposes the domain ports as tools for the agent."""

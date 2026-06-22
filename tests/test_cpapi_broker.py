@@ -53,7 +53,7 @@ async def test_cashqty_order_with_reply_loop():
 async def test_unknown_warning_blocks_and_declines_order():
     respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
         return_value=httpx.Response(
-            200, json=[{"id": "q1", "message": ["Risco alto!"], "messageIds": ["o999"]}]
+            200, json=[{"id": "q1", "message": ["High risk!"], "messageIds": ["o999"]}]
         )
     )
     decline = respx.post(f"{BASE}/iserver/reply/q1").mock(
@@ -62,12 +62,12 @@ async def test_unknown_warning_blocks_and_declines_order():
     client = CpapiClient(BASE)
     broker = CpapiBroker(client, ACCT, _resolver)
 
-    with pytest.raises(CpapiError, match="bloqueada"):
+    with pytest.raises(CpapiError, match="blocked"):
         await broker.place_order(
             OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("50"))
         )
 
-    # A ordem pendente foi recusada (confirmed:false) para não ficar Inactive.
+    # The pending order was declined (confirmed:false) so it isn't left Inactive.
     assert decline.called
     assert json.loads(decline.calls.last.request.content) == {"confirmed": False}
     await client.aclose()

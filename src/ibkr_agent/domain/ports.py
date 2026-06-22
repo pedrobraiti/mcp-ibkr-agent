@@ -1,7 +1,7 @@
-"""Portas (interfaces) do domínio — contratos que os adapters concretos implementam.
+"""Domain ports (interfaces) — contracts that the concrete adapters implement.
 
-São ``Protocol`` assíncronos: a implementação CPAPI (e futuros adapters como
-ib_async para dados, ou OAuth para auth) deve satisfazê-los sem herança explícita.
+These are async ``Protocol``s: the CPAPI implementation (and future adapters such as
+ib_async for data, or OAuth for auth) must satisfy them without explicit inheritance.
 """
 
 from __future__ import annotations
@@ -19,10 +19,10 @@ from .models import (
 
 @runtime_checkable
 class AuthPort(Protocol):
-    """Gerencia a sessão/autenticação com o broker (Gateway hoje, OAuth no futuro)."""
+    """Manages the session/authentication with the broker (Gateway today, OAuth in the future)."""
 
     async def ensure_session(self) -> None:
-        """Garante uma sessão válida, (re)autenticando ou fazendo keep-alive se preciso."""
+        """Ensures a valid session, (re)authenticating or doing a keep-alive if needed."""
         ...
 
     async def is_authenticated(self) -> bool:
@@ -31,7 +31,7 @@ class AuthPort(Protocol):
 
 @runtime_checkable
 class MarketDataPort(Protocol):
-    """Leitura de mercado e conta: resolução de símbolo, cotação, saldo e posições."""
+    """Market and account reads: symbol resolution, quote, balance and positions."""
 
     async def resolve_conid(self, symbol: str) -> int | None:
         ...
@@ -48,7 +48,7 @@ class MarketDataPort(Protocol):
 
 @runtime_checkable
 class BrokerPort(Protocol):
-    """Execução: enviar, consultar e cancelar ordens."""
+    """Execution: place, query and cancel orders."""
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
         ...

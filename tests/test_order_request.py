@@ -14,7 +14,7 @@ def test_quantity_order_is_valid_and_not_fractional():
 def test_fractional_quantity_is_accepted():
     order = OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=Decimal("0.0066"))
     assert order.quantity == Decimal("0.0066")
-    assert order.is_fractional is False  # is_fractional reflete cashQty, não a quantidade
+    assert order.is_fractional is False  # is_fractional reflects cashQty, not the quantity
 
 
 def test_cash_qty_order_is_fractional():

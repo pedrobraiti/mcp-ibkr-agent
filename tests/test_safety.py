@@ -79,7 +79,7 @@ async def test_live_blocked_without_allow_live():
 
 async def test_cashqty_over_limit_blocked():
     guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10")))
-    with pytest.raises(SafetyError, match="excede"):
+    with pytest.raises(SafetyError, match="exceeds"):
         await guarded.place_order(
             OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("500"))
         )
@@ -88,7 +88,7 @@ async def test_cashqty_over_limit_blocked():
 async def test_quantity_notional_uses_quote():
     broker = FakeBroker()
     guarded = _guarded(broker, FakeMarketData(Decimal("60")))  # 2 * 60 = 120 > 100
-    with pytest.raises(SafetyError, match="excede"):
+    with pytest.raises(SafetyError, match="exceeds"):
         await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=2))
     assert broker.placed == []
 
@@ -98,7 +98,7 @@ async def test_market_closed_blocks():
         FakeBroker(), FakeMarketData(Decimal("10")),
         require_market_open=True, is_market_open=lambda: False,
     )
-    with pytest.raises(SafetyError, match="fechado"):
+    with pytest.raises(SafetyError, match="closed"):
         await guarded.place_order(
             OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))
         )

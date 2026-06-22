@@ -7,7 +7,7 @@ ET = ZoneInfo("America/New_York")
 
 
 def test_open_on_regular_weekday_during_hours():
-    # Segunda-feira, 10:00 ET — dia comum de pregão.
+    # Monday, 10:00 ET — ordinary trading day.
     assert is_market_open_at(datetime(2026, 6, 22, 10, 0, tzinfo=ET)) is True
 
 
@@ -20,10 +20,10 @@ def test_closed_after_close():
 
 
 def test_closed_on_weekend():
-    # Sábado.
+    # Saturday.
     assert is_market_open_at(datetime(2026, 6, 20, 12, 0, tzinfo=ET)) is False
 
 
 def test_closed_on_nyse_holiday():
-    # Quinta-feira, mas é Ano Novo (feriado da NYSE) — fechado mesmo em horário de pregão.
+    # Thursday, but it's New Year's Day (NYSE holiday) — closed even during trading hours.
     assert is_market_open_at(datetime(2026, 1, 1, 12, 0, tzinfo=ET)) is False
