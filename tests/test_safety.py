@@ -146,3 +146,19 @@ async def test_duplicate_order_blocked(tmp_path):
     await guarded.place_order(_buy("AAPL", "10"))
     with pytest.raises(SafetyError, match="Duplicate"):
         await guarded.place_order(_buy("AAPL", "10"))
+
+
+async def test_symbol_denylist_blocks():
+    guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10")),
+                       symbol_denylist=frozenset({"TSLA"}))
+    with pytest.raises(SafetyError, match="deny-list"):
+        await guarded.place_order(_buy("tsla", "10"))
+
+
+async def test_symbol_allowlist_blocks_others_and_allows_listed():
+    guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10")),
+                       symbol_allowlist=frozenset({"AAPL"}))
+    with pytest.raises(SafetyError, match="allow-list"):
+        await guarded.place_order(_buy("MSFT", "10"))
+    result = await guarded.place_order(_buy("AAPL", "10"))
+    assert result.order_id == "real-1"

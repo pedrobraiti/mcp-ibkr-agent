@@ -31,6 +31,10 @@ class Services:
         )
 
 
+def _symbols(raw: str) -> frozenset[str]:
+    return frozenset(s.strip().upper() for s in raw.split(",") if s.strip())
+
+
 def build_services(settings: Settings | None = None) -> Services:
     settings = settings or get_settings()
     client = CpapiClient(settings.ibkr_api_base_url, timeout=settings.request_timeout_seconds)
@@ -54,6 +58,8 @@ def build_services(settings: Settings | None = None) -> Services:
         journal=journal,
         max_daily_value=settings.max_daily_value,
         duplicate_window_seconds=settings.duplicate_window_seconds,
+        symbol_allowlist=_symbols(settings.symbol_allowlist),
+        symbol_denylist=_symbols(settings.symbol_denylist),
     )
     return Services(
         settings=settings,

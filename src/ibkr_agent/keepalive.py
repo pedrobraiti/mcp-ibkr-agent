@@ -12,11 +12,21 @@ import asyncio
 import logging
 import sys
 
+import httpx
+
 from .config import get_settings
 from .server.services import build_services
 from .session import SessionKeeper
 
 logger = logging.getLogger("ibkr_agent.keepalive")
+
+
+def _notify_webhook(url: str, message: str) -> None:
+    """POST a one-way notification (no account data). Best-effort; never raises."""
+    try:
+        httpx.post(url, json={"text": message}, timeout=5)
+    except Exception:  # noqa: BLE001
+        logger.warning("Reauth webhook POST failed.")
 
 
 def _alert(reason: str) -> None:
@@ -26,6 +36,9 @@ def _alert(reason: str) -> None:
         sys.stderr.flush()
     except Exception:  # noqa: BLE001
         pass
+    url = get_settings().reauth_webhook_url
+    if url:
+        _notify_webhook(url, f"Valet: reauthentication required — {reason}")
 
 
 async def _run() -> None:

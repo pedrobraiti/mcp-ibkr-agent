@@ -93,6 +93,26 @@ async def test_quantity_order_body():
 
 
 @respx.mock
+async def test_cancel_order_fills_symbol_from_live_orders():
+    order = {"orderId": 55, "ticker": "AAPL", "side": "BUY", "status": "Submitted"}
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(200, json={"orders": [order]})
+    )
+    respx.delete(f"{BASE}/iserver/account/{ACCT}/order/55").mock(
+        return_value=httpx.Response(200, json={"msg": "ok", "order_id": "55"})
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    result = await broker.cancel_order("55")
+
+    assert result.symbol == "AAPL"
+    assert result.side.value == "BUY"
+    assert result.status.value == "cancelled"
+    await client.aclose()
+
+
+@respx.mock
 async def test_preview_order_parses_whatif():
     respx.post(f"{BASE}/iserver/account/{ACCT}/orders/whatif").mock(
         return_value=httpx.Response(

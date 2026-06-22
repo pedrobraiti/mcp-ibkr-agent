@@ -89,6 +89,16 @@ class CpapiBroker:
         return _parse_preview(response, request)
 
     async def cancel_order(self, order_id: str) -> OrderResult:
+        # Best-effort: resolve the symbol/side from live orders before cancelling.
+        symbol, side = "", OrderSide.SELL
+        try:
+            for order in await self.get_live_orders():
+                if order.order_id == str(order_id):
+                    symbol, side = order.symbol, order.side
+                    break
+        except CpapiError:
+            pass
+
         response = await self._client.delete(
             f"/iserver/account/{self._account_id}/order/{order_id}"
         )
@@ -96,8 +106,8 @@ class CpapiBroker:
         return OrderResult(
             order_id=order_id,
             status=OrderStatus.CANCELLED,
-            symbol="",
-            side=OrderSide.SELL,
+            symbol=symbol,
+            side=side,
             message=message,
             raw=response if isinstance(response, dict) else None,
         )

@@ -51,6 +51,8 @@ class GuardedBroker:
         journal: TradeJournal | None = None,
         max_daily_value: Decimal | None = None,
         duplicate_window_seconds: float = 0.0,
+        symbol_allowlist: frozenset[str] = frozenset(),
+        symbol_denylist: frozenset[str] = frozenset(),
     ):
         self._inner = inner
         self._market_data = market_data
@@ -63,6 +65,8 @@ class GuardedBroker:
         self._journal = journal
         self._max_daily_value = max_daily_value
         self._duplicate_window_seconds = duplicate_window_seconds
+        self._symbol_allowlist = symbol_allowlist
+        self._symbol_denylist = symbol_denylist
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
         notional: Decimal | None = None
@@ -71,6 +75,12 @@ class GuardedBroker:
                 raise SafetyError(
                     "LIVE mode blocked: set TRADING_ALLOW_LIVE=true to trade with real money."
                 )
+
+            symbol = request.symbol.upper()
+            if symbol in self._symbol_denylist:
+                raise SafetyError(f"Symbol {symbol} is on the deny-list.")
+            if self._symbol_allowlist and symbol not in self._symbol_allowlist:
+                raise SafetyError(f"Symbol {symbol} is not on the allow-list.")
 
             if self._require_market_open and not self._is_market_open():
                 raise SafetyError(

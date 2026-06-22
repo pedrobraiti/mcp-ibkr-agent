@@ -144,12 +144,13 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 
 ## Exposed tools
 
-`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `preview_order`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`, `trade_history`.
+`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`, `trade_history`.
 
 - `preview_order(symbol, side, ...)` estimates an order's **margin impact, commission and warnings** via IBKR's `whatif` — **without sending it** — so the agent can reason about cost before committing.
 - `buy` takes `cash_amount` (USD, fractional via `cashQty`) **or** `quantity` (shares, fractional ok).
 - `sell` takes only `quantity` (shares, fractional ok). IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
 - `close_position(symbol)` closes 100% of a position by trading the exact fractional quantity.
+- `portfolio()` returns a single snapshot: account summary + open positions + total unrealized P&L.
 - `trade_history(limit)` returns the audit log of recent order attempts (buys, sells, dry-runs, blocks) — answers "what did my agent do?".
 
 ## Usage example
@@ -189,6 +190,9 @@ Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an 
 - Optional **daily spend cap** (`MAX_DAILY_VALUE`) across all buys, tracked in the audit log — not just per-order.
 - **Duplicate-order guard**: an identical order within `DUPLICATE_WINDOW_SECONDS` is rejected (protects against timeout/retry double-buys).
 - Every order attempt (sent, dry-run, or blocked) is written to a local **audit log** (`logs/trades.jsonl`, gitignored).
+- Optional **symbol allow/deny list** (`SYMBOL_ALLOWLIST` / `SYMBOL_DENYLIST`) restricts the universe the agent can trade.
+
+The keep-alive can also POST to an optional **webhook** (`REAUTH_WEBHOOK_URL`, e.g. ntfy/Discord) when the session needs a fresh login — a one-way notification, no account data, no trade.
 
 ## Development
 

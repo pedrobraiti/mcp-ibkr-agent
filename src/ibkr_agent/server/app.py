@@ -87,6 +87,26 @@ async def positions() -> dict:
 
 
 @mcp.tool()
+async def portfolio() -> dict:
+    """Combined snapshot: account summary + open positions + total unrealized P&L."""
+    svc = services()
+    try:
+        await svc.auth.ensure_session()
+        summary = await svc.market_data.get_account_summary()
+        rows = await svc.market_data.get_positions()
+        total_pnl = sum((p.unrealized_pnl or Decimal(0) for p in rows), Decimal(0))
+        return _ok(
+            {
+                "summary": summary.model_dump(mode="json"),
+                "positions": [p.model_dump(mode="json") for p in rows],
+                "unrealized_pnl": str(total_pnl),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 async def buy(
     symbol: str, cash_amount: float | None = None, quantity: float | None = None
 ) -> dict:

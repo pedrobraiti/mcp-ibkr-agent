@@ -33,9 +33,16 @@ class Settings(BaseSettings):
     max_daily_value: Decimal | None = None
     # Reject an identical order (symbol/side/size) placed within this window. 0 = off.
     duplicate_window_seconds: float = 5.0
+    # Comma-separated tickers. If allowlist is set, only those can be traded; anything
+    # in the denylist is always blocked. Empty = no restriction.
+    symbol_allowlist: str = ""
+    symbol_denylist: str = ""
 
     # Audit
     trade_journal_path: str = "logs/trades.jsonl"
+
+    # Optional webhook (ntfy/Discord/generic) POSTed when the session needs reauth.
+    reauth_webhook_url: str = ""
 
     # Session / network
     tickle_interval_seconds: int = 60
