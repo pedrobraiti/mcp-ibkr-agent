@@ -29,13 +29,14 @@ Arquitetura confirmada na prática (ver `.claude/decisions.md`): CPAPI + cashQty
 O `.env` fica com `TRADING_MODE=live`, `TRADING_ALLOW_LIVE=false`, `TRADING_DRY_RUN=true` → leitura segura. Para o teste real eu **NÃO** mexi no `.env`: passei `TRADING_ALLOW_LIVE=true TRADING_DRY_RUN=false` por variável de ambiente num script temporário (já deletado), preservando a trava.
 
 ## Próximo passo concreto
-**Venda fracionária IMPLEMENTADA** (commit a seguir): `OrderRequest.quantity` virou `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` com quantidade fracionária (`sell` sem `cash_amount`, pois cashQty é buy-only); nova tool `close_position(symbol)` que lê o tamanho exato da posição e fecha 100% (evita o `o2137`). 21 testes, ruff limpo. A mecânica já foi provada ao vivo na recuperação de hoje (SELL quantity=0.0066 executou).
-Pendências (em ordem): (opcional) validar AO VIVO o caminho wired `buy`→`close_position` via MCP (exige `.env` allow_live=true/dry_run=false + reiniciar MCP); enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); tickle em background + alerta de reauth. A skill `/invest` (decisão) é tarefa do usuário.
+**EM ANDAMENTO: keep-alive `/tickle` em background + alerta de reauth** — manter a sessão da live viva e avisar quando cair (sem OAuth p/ varejo). É o passo estrutural rumo ao agendado/autônomo.
+Já FEITO e validado ao vivo hoje: caminho wired `buy`/`sell`/`close_position` (chamando as funções reais do app com allow_live por env). `buy` US$2 e `sell` 0.0066 passaram (round-trip, flat). `close_position` foi endurecido após o teste expor que o `/portfolio/positions` é eventualmente-consistente (ficou 0.0 por 30s+ pós-compra): `get_positions` agora filtra linhas com qty 0, há `invalidate_positions()`, e `close_position` invalida antes de ler + mensagem honesta sobre o lag.
+Depois do keep-alive: enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); feriados no RTH. A skill `/invest` (decisão) é tarefa do usuário.
 
 ## Em aberto / armadilhas
 - **`o2137`** (venda > posição) propositalmente FORA da allow-list global — auto-confirmar oversell é perigoso. Fechar posição = vender quantidade exata, sem o warning.
 - Ordens bloqueadas deixam órfãs `Inactive` na conta (não executam, não dá pra cancelar — HTTP 400; somem sozinhas). Resolver com Decline ao bloquear.
-- Endpoint de `positions` tem **cache lento** — após operar, confirmar flat pelo **ledger** (`/portfolio/{acct}/ledger` → `stockmarketvalue`/`cashbalance`), não só por positions.
+- Endpoint de `positions` tem **cache lento / eventualmente-consistente** — após uma COMPRA pode ficar 30s+ sem refletir (visto no teste wired). Confirmar estado pelo **ledger** (`/portfolio/{acct}/ledger` → `stockmarketvalue`/`cashbalance`). `close_position` logo após comprar pode retornar `closed=False` — esperar e repetir, ou vender pela quantidade exata.
 - Sessão da live expira e cai na manutenção ~01:00 ET; precisa relogar (sem OAuth p/ varejo).
 - Gateway extraído em `C:\Users\ACS Gamer\Documents\vscode-local\ibkr-gateway` (fora do repo); subir com `./bin/run.bat root/conf.yaml`.
 - bid/ask às vezes None (sem subscrição de market data); last_price funciona. Ordens são MKT, então ok.

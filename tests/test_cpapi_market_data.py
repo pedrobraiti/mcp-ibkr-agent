@@ -65,6 +65,31 @@ async def test_get_quote_handles_snapshot_warmup():
 
 
 @respx.mock
+async def test_get_positions_skips_zero_quantity_rows():
+    respx.get(f"{BASE}/portfolio/{ACCT}/positions/0").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"conid": 265598, "contractDesc": "AAPL", "position": 0.0066},
+                {"conid": 8314, "contractDesc": "IBM", "position": 0.0},
+            ],
+        )
+    )
+    respx.get(f"{BASE}/portfolio/{ACCT}/positions/1").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+
+    rows = await md.get_positions()
+
+    assert len(rows) == 1
+    assert rows[0].symbol == "AAPL"
+    assert rows[0].quantity == Decimal("0.0066")
+    await client.aclose()
+
+
+@respx.mock
 async def test_account_summary_parses_amount_objects():
     respx.get(f"{BASE}/portfolio/{ACCT}/summary").mock(
         return_value=httpx.Response(

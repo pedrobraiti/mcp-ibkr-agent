@@ -3,7 +3,7 @@
 Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 
 ## Em progresso
-- [ ] (Opcional, mercado aberto) Validar AO VIVO o caminho wired do agente: `buy` US$2 → `close_position` via MCP. Exige `.env` com allow_live=true/dry_run=false e reiniciar o MCP (a mecânica de venda fracionária já foi provada ao vivo na recuperação de hoje)
+- [ ] **Keep-alive `/tickle` em background + alerta de reauth** (próximo passo rumo ao autônomo): manter a sessão viva e avisar quando cair (sem OAuth p/ varejo)
 
 ## Próximas
 - [ ] Ao BLOQUEAR um warning fora da allow-list, enviar `Decline` (`reply` com `confirmed:false`) em vez de só não responder — hoje deixa uma ordem `Inactive` órfã na conta (vista no teste: 864501251/520/523)
@@ -30,3 +30,4 @@ Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 - [x] MCP `ibkr` REGISTRADO no Claude Code (escopo local, `claude mcp add`) — status Connected. Tools aparecem numa sessão NOVA
 - [x] TESTE DE ORDEM REAL (mercado aberto, conta real): round-trip US$2 em AAPL. BUY via `cashQty` executou (0.0066 @ 298.96); allow-list de reply mapeada ao vivo (`o354`+`o10164`+`o10223`+`o10151`+`o10153`). Descoberta: `cashQty` é buy-only → venda fechada por quantidade fracionária exata (0.0066 @ 300.41); caixa recuperado (US$8.84, flat). Ver decisions.md 2026-06-22
 - [x] Venda fracionária: `OrderRequest.quantity` de `int` → `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` aceitam quantidade fracionária (`sell` sem `cash_amount`, inválido na IBKR); nova tool `close_position(symbol)` que lê o tamanho exato e fecha 100%. Testes novos (fracionário no model e no broker; close_position no server). 21 testes, ruff limpo
+- [x] VALIDAÇÃO WIRED ao vivo (mercado aberto): chamadas reais das funções `buy`/`sell`/`close_position` do app. `buy` US$2 e `sell` 0.0066 passaram (round-trip, flat). `close_position` revelou fragilidade: depende do `/portfolio/positions`, eventualmente-consistente (ficou 0.0 por 30s+ após a compra). Endurecido: `get_positions` filtra linhas com quantidade 0 (também conserta contagem fantasma do healthcheck); novo `invalidate_positions()`; `close_position` invalida antes de ler e retorna mensagem honesta sobre o lag. 22 testes, ruff limpo

@@ -6,7 +6,7 @@ import asyncio
 from decimal import Decimal, InvalidOperation
 
 from ...domain.models import AccountSummary, Position, Quote
-from .client import CpapiClient
+from .client import CpapiClient, CpapiError
 
 FIELD_LAST = "31"
 FIELD_BID = "84"
@@ -83,9 +83,23 @@ class CpapiMarketData:
             if not isinstance(data, list) or not data:
                 break
             for raw in data:
-                positions.append(_to_position(raw))
+                position = _to_position(raw)
+                if position.quantity != 0:  # a IBKR mantém linhas zeradas no cache
+                    positions.append(position)
             page += 1
         return positions
+
+    async def invalidate_positions(self) -> None:
+        """Pede ao gateway para invalidar o cache de posições (best-effort).
+
+        O endpoint de posições é eventualmente-consistente: após uma ordem recente
+        ele pode demorar dezenas de segundos para refletir. Invalidar ajuda, mas não
+        garante atualização imediata — por isso não falhamos o fluxo se der erro.
+        """
+        try:
+            await self._client.post(f"/portfolio/{self._account_id}/positions/invalidate")
+        except CpapiError:
+            pass
 
 
 def _pick_us_conid(data: dict, symbol: str) -> int | None:
