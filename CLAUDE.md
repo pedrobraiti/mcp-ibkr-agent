@@ -63,6 +63,34 @@ A healthy result shows `authenticated=True connected=True`, the account flags
 
 ---
 
+## Known issues
+
+### Login goes through but nothing happens
+
+**Symptom:** the user opens `https://localhost:5000`, logs in, approves 2FA, the page
+loads — but then nothing happens. It just sits there and never reaches a logged-in
+state, and the healthcheck keeps reporting `authenticated=False` / `connected=False`
+(sometimes with `ssodh/init` returning HTTP 500 or a `no bridge` error).
+
+**What fixes it:** restart the gateway cleanly and log in fresh. Stop the gateway's Java
+process, start it again (`bin\run.bat root\conf.yaml` on Windows, `bin/run.sh
+root/conf.yaml` on Linux/macOS), then reload `https://localhost:5000` and log in again.
+A clean restart clears this in the large majority of cases — guide the user through it
+first. Logging in from an incognito/private browser tab also helps (stale cookies can
+get in the way).
+
+**If it still persists:** it can also help to log out of any other IBKR session — IBKR
+allows only one brokerage session per username, so a session open in IBKR Mobile or the
+Client Portal web can block the gateway. Have the user log those out, restart the
+gateway once more, and try again.
+
+**Important — the login is not sticky.** Every time a fresh login is needed (the session
+expired, the machine slept, the daily maintenance window passed), do the clean restart
+*first*; don't just retry the login against the gateway that's already running. The
+sequence is always: restart the gateway → then log in.
+
+---
+
 ## Using Valet day to day
 
 - Tools: `session_status`, `market_status`, `get_quote`, `account_summary`,

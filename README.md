@@ -133,11 +133,11 @@ It `/tickle`s every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emits
 
 ### Login troubleshooting
 
-If the browser shows **"Client login succeeds"** but the API stays `authenticated:false`/`connected:false` (or `ssodh/init` returns HTTP 500 / `no bridge`):
+If you log in and approve 2FA but **nothing happens** — the page just sits there and the API stays `authenticated:false`/`connected:false` (sometimes `ssodh/init` returns HTTP 500 / `no bridge`):
 
-- **Restart the gateway clean** (kill the Java process and start it again).
-- Log in from a **Chrome incognito tab** (stale cookies get in the way).
-- **Log out competing sessions**: IBKR Mobile and Client Portal web (one brokerage session per username).
+- **Restart the gateway clean and log in fresh** — this is what fixes it almost every time. Kill the Java process, start it again, reload `https://localhost:5000`, and log in. An incognito/private tab also helps (stale cookies).
+- The login is **not sticky**: each time you need a fresh login, restart the gateway *first*, then log in — don't retry against the already-running gateway.
+- **If it still persists**, log out of any other IBKR session (IBKR Mobile or Client Portal web) — only one brokerage session per username is allowed — then restart the gateway and try again.
 - The old *launcher* build (2023) is **not** the problem — at runtime the gateway connects to the current backend.
 
 ## Exposed tools
