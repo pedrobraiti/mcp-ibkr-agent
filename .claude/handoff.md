@@ -29,9 +29,14 @@ Arquitetura confirmada na prática (ver `.claude/decisions.md`): CPAPI + cashQty
 O `.env` fica com `TRADING_MODE=live`, `TRADING_ALLOW_LIVE=false`, `TRADING_DRY_RUN=true` → leitura segura. Para o teste real eu **NÃO** mexi no `.env`: passei `TRADING_ALLOW_LIVE=true TRADING_DRY_RUN=false` por variável de ambiente num script temporário (já deletado), preservando a trava.
 
 ## Próximo passo concreto
-**Keep-alive + alerta de reauth FEITO** (commit a seguir): componente `session/SessionKeeper` + runnable `python -m ibkr_agent.keepalive` (console script `ibkr-keepalive`). Faz tickle no intervalo, recuperação leve via `ensure_session` quando connected-sem-auth, e alerta (sem spam, com bip) quando cai e precisa relogar. 27 testes + smoke ao vivo (tickle real, sem alerta). README documentado.
-Também validado wired hoje: `buy`/`sell`/`close_position` (funções reais do app). `close_position` endurecido contra o cache eventual de `/portfolio/positions` (filtra qty 0, invalida antes de ler, mensagem honesta sobre o lag).
-Pendências (escolher a próxima): enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); feriados no `is_market_open_now`; (opcional) integrar o SessionKeeper no lifespan do MCP server. A skill `/invest` (decisão) é tarefa do usuário.
+Rodada de polimento FEITA (commits recentes). O MCP está completo e robusto:
+- **Keep-alive + alerta de reauth**: `session/SessionKeeper` + runnable `python -m ibkr_agent.keepalive` (`ibkr-keepalive`). Tickle no intervalo, recuperação leve, alerta sem spam com bip. Smoke ao vivo OK.
+- **Decline ao bloquear**: warning fora da allow-list agora envia `reply confirmed:false` (não deixa ordem `Inactive` órfã).
+- **Feriados NYSE**: `market_hours` usa a lib `holidays`; `is_market_open_at` (pura, testável) + `is_market_open_now`.
+- **close_position** endurecido contra o cache eventual de `/portfolio/positions` (filtra qty 0, invalida antes de ler, mensagem honesta).
+- **32 testes**, ruff limpo, tudo no GitHub. About do repo preenchido (descrição + 12 tópicos), README com exemplo de uso + seção de keep-alive.
+
+Pendências menores restantes (nenhuma bloqueia): meios-expedientes (~13:00 ET) no RTH; precisão float de positions; (opcional) SessionKeeper no lifespan do MCP. A skill `/invest` (decisão) é tarefa do usuário — é o próximo grande bloco do projeto.
 
 ## Em aberto / armadilhas
 - **`o2137`** (venda > posição) propositalmente FORA da allow-list global — auto-confirmar oversell é perigoso. Fechar posição = vender quantidade exata, sem o warning.

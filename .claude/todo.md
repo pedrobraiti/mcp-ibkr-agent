@@ -6,10 +6,9 @@ Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 - (nada em andamento — próxima tarefa abaixo)
 
 ## Próximas
-- [ ] Ao BLOQUEAR um warning fora da allow-list, enviar `Decline` (`reply` com `confirmed:false`) em vez de só não responder — hoje deixa uma ordem `Inactive` órfã na conta (vista no teste: 864501251/520/523)
-- [ ] No `sell` por valor em US$: converter dólar→ações via cotação (cashQty não vale p/ venda); para "vender tudo" usar a quantidade exata da posição (evita o warning `o2137`)
-- [ ] Loop de `tickle` em background + monitor que avisa quando a sessão cair (reautenticar)
-- [ ] Tratar feriados no `is_market_open_now` (calendário de mercado)
+- [ ] No `sell` por valor em US$: converter dólar→ações via cotação (cashQty não vale p/ venda); para "vender tudo" usar a quantidade exata da posição (evita o warning `o2137`) — hoje resolvido por `close_position`
+- [ ] (Opcional) integrar o `SessionKeeper` no lifespan do MCP server (redundante com `ibkr-keepalive`; deixado de fora por ser mais invasivo)
+- [ ] Tratar pregões de fechamento ANTECIPADO (meios-expedientes ~13:00 ET) no RTH — hoje só fechamentos totais (feriados NYSE) são tratados
 - [ ] Polir precisão de positions (mktPrice/avgCost vêm como float) quando houver posições reais
 - [ ] (Futuro) acompanhar preenchimento de ordem (status Filled) e P&L pós-venda
 - [ ] (Descartado) OAuth — IBKR não libera p/ varejo; auth só Gateway (ver decisions.md)
@@ -32,3 +31,5 @@ Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 - [x] Venda fracionária: `OrderRequest.quantity` de `int` → `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` aceitam quantidade fracionária (`sell` sem `cash_amount`, inválido na IBKR); nova tool `close_position(symbol)` que lê o tamanho exato e fecha 100%. Testes novos (fracionário no model e no broker; close_position no server). 21 testes, ruff limpo
 - [x] VALIDAÇÃO WIRED ao vivo (mercado aberto): chamadas reais das funções `buy`/`sell`/`close_position` do app. `buy` US$2 e `sell` 0.0066 passaram (round-trip, flat). `close_position` revelou fragilidade: depende do `/portfolio/positions`, eventualmente-consistente (ficou 0.0 por 30s+ após a compra). Endurecido: `get_positions` filtra linhas com quantidade 0 (também conserta contagem fantasma do healthcheck); novo `invalidate_positions()`; `close_position` invalida antes de ler e retorna mensagem honesta sobre o lag. 22 testes, ruff limpo
 - [x] Keep-alive `/tickle` + alerta de reauth: componente `session/SessionKeeper` (tickle no intervalo; recuperação leve via ensure_session quando connected-sem-auth; alerta sem spam quando cai) + runnable `python -m ibkr_agent.keepalive` (console script `ibkr-keepalive`) com bip e mensagem `[ALERTA]`. Testes unitários (5) + smoke ao vivo (tickle real, sem alerta). README com seção "Mantendo a sessão viva". 27 testes, ruff limpo
+- [x] Decline ao bloquear warning: `_resolve_replies` envia `reply confirmed:false` antes de levantar o erro, para não deixar ordem `Inactive` órfã (best-effort). Teste atualizado verifica a recusa
+- [x] Feriados da NYSE no RTH: `market_hours` usa a lib `holidays` (NYSE), refatorado em `is_market_open_at` (função pura testável) + `is_market_open_now`. 5 testes novos (dia comum/antes/depois/fim de semana/feriado). 32 testes, ruff limpo
