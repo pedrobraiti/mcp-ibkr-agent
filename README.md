@@ -1,5 +1,10 @@
 # mcp-ibkr-agent
 
+[![CI](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/pedrobraiti/mcp-ibkr-agent/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-validado%20ao%20vivo-success)
+
 Servidor **MCP** que dá a um agente de IA (como o Claude Code) a capacidade de operar na **Interactive Brokers**: consultar cotações, saldo, posições e ordens, e **comprar/vender** — inclusive **ações fracionárias por valor em dólar** (`cashQty`) via Client Portal API.
 
 A *decisão* de investimento (o que/quando comprar ou vender) fica com você e com o prompt da sua skill. Este projeto entrega só o **encanamento de trading confiável** — com travas de segurança por padrão.
@@ -8,7 +13,19 @@ A *decisão* de investimento (o que/quando comprar ou vender) fica com você e c
 
 ## Arquitetura
 
-Hexagonal (ports & adapters):
+Hexagonal (ports & adapters). O agente fala só com as tools do MCP; as travas de
+segurança ficam no caminho de toda ordem; a IBKR é um detalhe de adapter:
+
+```mermaid
+flowchart LR
+    A["Agente IA<br/>(skill /invest)"] -->|tools MCP| B["Servidor MCP<br/>(FastMCP)"]
+    B --> C["GuardedBroker<br/>(travas de segurança)"]
+    B --> D["MarketData"]
+    C --> E["Adapters CPAPI"]
+    D --> E
+    E -->|REST localhost:5000| F["IBKR Client<br/>Portal Gateway"]
+    F --> G["Interactive Brokers"]
+```
 
 ```
 domain/      modelos (OrderRequest com quantity OU cash_qty) e portas (Broker/MarketData/Auth)
