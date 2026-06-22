@@ -102,7 +102,7 @@ class CpapiBroker:
         if request.cash_qty is not None:
             order["cashQty"] = float(request.cash_qty)
         else:
-            order["quantity"] = request.quantity
+            order["quantity"] = float(request.quantity)
         if request.order_type is OrderType.LIMIT and request.limit_price is not None:
             order["price"] = float(request.limit_price)
         return order

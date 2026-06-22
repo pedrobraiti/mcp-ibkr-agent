@@ -82,9 +82,11 @@ Se o navegador mostra **"Client login succeeds"** mas a API segue `authenticated
 
 ## Tools expostas
 
-`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `buy`, `sell`, `cancel_order`, `open_orders`.
+`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`.
 
-`buy`/`sell` aceitam `cash_amount` (US$, fracionário) **ou** `quantity` (ações inteiras).
+- `buy` aceita `cash_amount` (US$, fracionário via `cashQty`) **ou** `quantity` (ações, fracionário ok).
+- `sell` aceita só `quantity` (ações, fracionário ok). A IBKR **não** permite venda por valor em US$ — `cashQty` é só para compra.
+- `close_position(symbol)` fecha 100% de uma posição negociando a quantidade fracionária exata.
 
 ## Segurança (padrões)
 

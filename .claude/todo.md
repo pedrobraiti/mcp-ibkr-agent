@@ -3,7 +3,7 @@
 Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 
 ## Em progresso
-- [ ] **Suportar venda fracionária por quantidade** (cashQty é buy-only — ver decisions.md 2026-06-22): `OrderRequest.quantity` de `int` → `Decimal`; `broker._build_order` envia `float(quantity)`; tools `buy`/`sell` aceitam quantidade fracionária; ajustar guard (notional via quote) e testes. Idealmente adicionar primitiva `close_position(symbol)` que lê o tamanho exato e vende tudo.
+- [ ] (Opcional, mercado aberto) Validar AO VIVO o caminho wired do agente: `buy` US$2 → `close_position` via MCP. Exige `.env` com allow_live=true/dry_run=false e reiniciar o MCP (a mecânica de venda fracionária já foi provada ao vivo na recuperação de hoje)
 
 ## Próximas
 - [ ] Ao BLOQUEAR um warning fora da allow-list, enviar `Decline` (`reply` com `confirmed:false`) em vez de só não responder — hoje deixa uma ordem `Inactive` órfã na conta (vista no teste: 864501251/520/523)
@@ -29,3 +29,4 @@ Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 - [x] `config.py` acha o `.env` por caminho ABSOLUTO (funciona quando o Claude Code lança o MCP de outro CWD)
 - [x] MCP `ibkr` REGISTRADO no Claude Code (escopo local, `claude mcp add`) — status Connected. Tools aparecem numa sessão NOVA
 - [x] TESTE DE ORDEM REAL (mercado aberto, conta real): round-trip US$2 em AAPL. BUY via `cashQty` executou (0.0066 @ 298.96); allow-list de reply mapeada ao vivo (`o354`+`o10164`+`o10223`+`o10151`+`o10153`). Descoberta: `cashQty` é buy-only → venda fechada por quantidade fracionária exata (0.0066 @ 300.41); caixa recuperado (US$8.84, flat). Ver decisions.md 2026-06-22
+- [x] Venda fracionária: `OrderRequest.quantity` de `int` → `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` aceitam quantidade fracionária (`sell` sem `cash_amount`, inválido na IBKR); nova tool `close_position(symbol)` que lê o tamanho exato e fecha 100%. Testes novos (fracionário no model e no broker; close_position no server). 21 testes, ruff limpo

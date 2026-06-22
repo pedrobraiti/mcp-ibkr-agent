@@ -29,12 +29,8 @@ Arquitetura confirmada na prática (ver `.claude/decisions.md`): CPAPI + cashQty
 O `.env` fica com `TRADING_MODE=live`, `TRADING_ALLOW_LIVE=false`, `TRADING_DRY_RUN=true` → leitura segura. Para o teste real eu **NÃO** mexi no `.env`: passei `TRADING_ALLOW_LIVE=true TRADING_DRY_RUN=false` por variável de ambiente num script temporário (já deletado), preservando a trava.
 
 ## Próximo passo concreto
-**Implementar venda fracionária** (é o gap que o teste revelou — hoje o agente NÃO consegue fechar posição fracionária):
-1. `OrderRequest.quantity`: `int` → `Decimal` (aceitar ações fracionárias). Manter `gt=0`. Atualizar validador/docstring.
-2. `broker._build_order`: `order["quantity"] = float(request.quantity)`.
-3. Tools MCP `buy`/`sell` em `server/app.py`: param `quantity` de `int` → `float`; no `sell`, como cashQty não vale, converter `cash_amount`→ações via cotação OU exigir quantidade. Idealmente nova tool `close_position(symbol)` que lê o tamanho exato e vende tudo (evita o warning `o2137` de oversell).
-4. Ajustar guard (notional via quote para quantity) e testes (`test_order_request`, `test_cpapi_broker`).
-Depois disso: enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); tickle em background + alerta de reauth. A skill `/invest` (decisão) é tarefa do usuário.
+**Venda fracionária IMPLEMENTADA** (commit a seguir): `OrderRequest.quantity` virou `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` com quantidade fracionária (`sell` sem `cash_amount`, pois cashQty é buy-only); nova tool `close_position(symbol)` que lê o tamanho exato da posição e fecha 100% (evita o `o2137`). 21 testes, ruff limpo. A mecânica já foi provada ao vivo na recuperação de hoje (SELL quantity=0.0066 executou).
+Pendências (em ordem): (opcional) validar AO VIVO o caminho wired `buy`→`close_position` via MCP (exige `.env` allow_live=true/dry_run=false + reiniciar MCP); enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); tickle em background + alerta de reauth. A skill `/invest` (decisão) é tarefa do usuário.
 
 ## Em aberto / armadilhas
 - **`o2137`** (venda > posição) propositalmente FORA da allow-list global — auto-confirmar oversell é perigoso. Fechar posição = vender quantidade exata, sem o warning.

@@ -83,3 +83,23 @@ async def test_quantity_order_body():
     assert order["quantity"] == 3
     assert "cashQty" not in order
     await client.aclose()
+
+
+@respx.mock
+async def test_fractional_quantity_sell_body():
+    orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "10", "order_status": "Submitted"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    result = await broker.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=Decimal("0.0066"))
+    )
+
+    assert result.order_id == "10"
+    order = _sent_order(orders)
+    assert order["quantity"] == 0.0066
+    assert order["side"] == "SELL"
+    assert "cashQty" not in order
+    await client.aclose()
