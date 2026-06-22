@@ -108,15 +108,30 @@ async def sell(symbol: str, quantity: float) -> dict:
 
 @mcp.tool()
 async def close_position(symbol: str) -> dict:
-    """Fecha 100% da posição de um símbolo, negociando a quantidade fracionária exata."""
+    """Fecha 100% da posição de um símbolo, negociando a quantidade fracionária exata.
+
+    Lê o tamanho exato da posição e envia a ordem oposta. Atenção: o portfolio da
+    IBKR é eventualmente-consistente — logo após uma COMPRA recente a posição pode
+    ainda não aparecer (e o fechamento retornará `closed=False`). Nesse caso, espere
+    alguns segundos e tente de novo, ou venda pela quantidade exata via `sell`.
+    """
     svc = services()
     try:
         await svc.auth.ensure_session()
         conid = await svc.market_data.resolve_conid(symbol)
+        await svc.market_data.invalidate_positions()
         rows = await svc.market_data.get_positions()
         position = next((p for p in rows if p.conid == conid), None)
         if position is None or position.quantity == 0:
-            return _ok({"closed": False, "reason": f"Sem posição aberta em {symbol.upper()}."})
+            return _ok(
+                {
+                    "closed": False,
+                    "reason": (
+                        f"Sem posição aberta em {symbol.upper()} (lembre: o portfolio "
+                        "da IBKR pode levar dezenas de segundos para refletir uma compra recente)."
+                    ),
+                }
+            )
 
         side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
         request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
