@@ -88,18 +88,42 @@ async def positions() -> dict:
 
 @mcp.tool()
 async def buy(
-    symbol: str, cash_amount: float | None = None, quantity: int | None = None
+    symbol: str, cash_amount: float | None = None, quantity: float | None = None
 ) -> dict:
-    """Compra a mercado. Informe `cash_amount` (US$, fracionário) OU `quantity` (ações inteiras)."""
+    """Compra a mercado. Informe `cash_amount` (US$, fracionário via cashQty) OU
+    `quantity` (ações, fracionário ok)."""
     return await _place(OrderSide.BUY, symbol, cash_amount, quantity)
 
 
 @mcp.tool()
-async def sell(
-    symbol: str, cash_amount: float | None = None, quantity: int | None = None
-) -> dict:
-    """Vende a mercado. Informe `cash_amount` (US$, fracionário) OU `quantity` (ações inteiras)."""
-    return await _place(OrderSide.SELL, symbol, cash_amount, quantity)
+async def sell(symbol: str, quantity: float) -> dict:
+    """Vende a mercado por `quantity` (ações, fracionário ok).
+
+    A IBKR NÃO aceita venda por valor em US$ (cashQty é só para compra). Para sair
+    de 100% de uma posição use `close_position`; para vender um valor em dólar,
+    calcule a quantidade via `get_quote`.
+    """
+    return await _place(OrderSide.SELL, symbol, None, quantity)
+
+
+@mcp.tool()
+async def close_position(symbol: str) -> dict:
+    """Fecha 100% da posição de um símbolo, negociando a quantidade fracionária exata."""
+    svc = services()
+    try:
+        await svc.auth.ensure_session()
+        conid = await svc.market_data.resolve_conid(symbol)
+        rows = await svc.market_data.get_positions()
+        position = next((p for p in rows if p.conid == conid), None)
+        if position is None or position.quantity == 0:
+            return _ok({"closed": False, "reason": f"Sem posição aberta em {symbol.upper()}."})
+
+        side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
+        request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
+        result = await svc.broker.place_order(request)
+        return _ok(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool()
@@ -127,7 +151,7 @@ async def open_orders() -> dict:
 
 
 async def _place(
-    side: OrderSide, symbol: str, cash_amount: float | None, quantity: int | None
+    side: OrderSide, symbol: str, cash_amount: float | None, quantity: float | None
 ) -> dict:
     svc = services()
     try:
@@ -135,7 +159,7 @@ async def _place(
             symbol=symbol,
             side=side,
             cash_qty=Decimal(str(cash_amount)) if cash_amount is not None else None,
-            quantity=quantity,
+            quantity=Decimal(str(quantity)) if quantity is not None else None,
         )
         await svc.auth.ensure_session()
         result = await svc.broker.place_order(request)

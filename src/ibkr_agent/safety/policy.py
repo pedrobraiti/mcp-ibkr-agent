@@ -90,4 +90,4 @@ class GuardedBroker:
             raise SafetyError(
                 f"Sem preço para {request.symbol}: não dá para validar o limite de valor da ordem."
             )
-        return price * Decimal(request.quantity or 0)
+        return price * (request.quantity or Decimal(0))

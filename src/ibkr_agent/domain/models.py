@@ -1,8 +1,12 @@
 """Modelos de domínio — agnósticos ao broker concreto.
 
 Valores monetários usam ``Decimal`` para evitar erro de ponto flutuante.
-Uma ordem é expressa por ``quantity`` (ações inteiras) OU ``cash_qty`` (valor em
-dólar, que habilita fracionário via CPAPI) — nunca os dois ao mesmo tempo.
+Uma ordem é expressa por ``quantity`` (número de ações, fracionário permitido) OU
+``cash_qty`` (valor em dólar) — nunca os dois ao mesmo tempo.
+
+Nota CPAPI: ``cash_qty`` (cashQty) só é aceito em COMPRAS. Para vender/fechar uma
+posição fracionária é obrigatório usar ``quantity`` fracionária (a IBKR rejeita
+cashQty em ordens de venda). Por isso ``quantity`` é ``Decimal``, não ``int``.
 """
 
 from __future__ import annotations
@@ -43,7 +47,9 @@ class OrderRequest(BaseModel):
     symbol: str
     side: OrderSide
     order_type: OrderType = OrderType.MARKET
-    quantity: int | None = Field(default=None, gt=0, description="Ações inteiras.")
+    quantity: Decimal | None = Field(
+        default=None, gt=0, description="Número de ações (fracionário permitido)."
+    )
     cash_qty: Decimal | None = Field(
         default=None, gt=0, description="Valor em US$ (fracionário via cashQty)."
     )
