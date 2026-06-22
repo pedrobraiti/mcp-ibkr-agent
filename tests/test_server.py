@@ -15,6 +15,7 @@ async def test_tools_are_registered():
         "buy",
         "sell",
         "close_position",
+        "preview_order",
         "cancel_order",
         "open_orders",
         "trade_history",

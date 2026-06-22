@@ -10,6 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from .models import (
     AccountSummary,
+    OrderPreview,
     OrderRequest,
     OrderResult,
     Position,
@@ -51,6 +52,10 @@ class BrokerPort(Protocol):
     """Execution: place, query and cancel orders."""
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
+        ...
+
+    async def preview_order(self, request: OrderRequest) -> OrderPreview:
+        """Estimate margin/commission/warnings for an order without sending it."""
         ...
 
     async def cancel_order(self, order_id: str) -> OrderResult:

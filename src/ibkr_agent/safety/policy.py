@@ -18,7 +18,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from decimal import Decimal
 
-from ..domain.models import OrderRequest, OrderResult, OrderSide, OrderStatus, TradingMode
+from ..domain.models import (
+    OrderPreview,
+    OrderRequest,
+    OrderResult,
+    OrderSide,
+    OrderStatus,
+    TradingMode,
+)
 from ..domain.ports import BrokerPort, MarketDataPort
 from ..journal import TradeJournal
 
@@ -104,6 +111,10 @@ class GuardedBroker:
         except Exception as exc:  # noqa: BLE001 - record the failed attempt, then re-raise
             self._record(request, notional, error=exc)
             raise
+
+    async def preview_order(self, request: OrderRequest) -> OrderPreview:
+        # Read-only estimate (margin/commission/warnings); no guard needed.
+        return await self._inner.preview_order(request)
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         return await self._inner.cancel_order(order_id)

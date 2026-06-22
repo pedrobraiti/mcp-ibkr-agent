@@ -144,8 +144,9 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 
 ## Exposed tools
 
-`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`, `trade_history`.
+`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `preview_order`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`, `trade_history`.
 
+- `preview_order(symbol, side, ...)` estimates an order's **margin impact, commission and warnings** via IBKR's `whatif` — **without sending it** — so the agent can reason about cost before committing.
 - `buy` takes `cash_amount` (USD, fractional via `cashQty`) **or** `quantity` (shares, fractional ok).
 - `sell` takes only `quantity` (shares, fractional ok). IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
 - `close_position(symbol)` closes 100% of a position by trading the exact fractional quantity.

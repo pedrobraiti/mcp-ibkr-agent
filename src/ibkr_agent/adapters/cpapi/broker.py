@@ -13,7 +13,14 @@ import uuid
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
-from ...domain.models import OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType
+from ...domain.models import (
+    OrderPreview,
+    OrderRequest,
+    OrderResult,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
 from .client import CpapiClient, CpapiError
 
 # Benign warnings accepted by default — standard CPAPI precaution confirmations
@@ -69,6 +76,17 @@ class CpapiBroker:
         )
         response = await self._resolve_replies(response)
         return self._parse_ack(response, request)
+
+    async def preview_order(self, request: OrderRequest) -> OrderPreview:
+        conid = await self._resolve_conid(request.symbol)
+        if conid is None:
+            raise CpapiError(f"Could not resolve the conid for {request.symbol}.")
+
+        payload = {"orders": [self._build_order(request, conid)]}
+        response = await self._client.post(
+            f"/iserver/account/{self._account_id}/orders/whatif", json=payload
+        )
+        return _parse_preview(response, request)
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         response = await self._client.delete(
@@ -157,6 +175,28 @@ class CpapiBroker:
             message=f"Unexpected response from the CPAPI: {ack}",
             raw=ack if isinstance(ack, dict) else None,
         )
+
+
+def _parse_preview(response: object, request: OrderRequest) -> OrderPreview:
+    """Parse the whatif response defensively; ``raw`` always carries the full payload."""
+    data = response[0] if isinstance(response, list) and response else response
+    data = data if isinstance(data, dict) else {}
+    amount = data.get("amount") if isinstance(data.get("amount"), dict) else {}
+    initial = data.get("initial") if isinstance(data.get("initial"), dict) else {}
+    equity = data.get("equity") if isinstance(data.get("equity"), dict) else {}
+
+    warnings = [str(data[key]) for key in ("warn", "error") if data.get(key)]
+
+    return OrderPreview(
+        symbol=request.symbol.upper(),
+        side=request.side,
+        commission=_dec(amount.get("commission")),
+        amount=_dec(amount.get("total") or amount.get("amount")),
+        margin_change=_dec(initial.get("change")),
+        equity_change=_dec(equity.get("change")),
+        warnings=warnings,
+        raw=data or None,
+    )
 
 
 def _live_order_to_result(order: dict) -> OrderResult:

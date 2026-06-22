@@ -142,6 +142,30 @@ async def close_position(symbol: str) -> dict:
 
 
 @mcp.tool()
+async def preview_order(
+    symbol: str, side: str = "BUY", cash_amount: float | None = None, quantity: float | None = None
+) -> dict:
+    """Preview an order's impact (margin, estimated commission, warnings) WITHOUT sending it.
+
+    Uses IBKR's whatif so the agent can reason about cost/margin before committing. `side`
+    is "BUY" or "SELL"; size is `cash_amount` (USD) or `quantity` (shares).
+    """
+    svc = services()
+    try:
+        request = OrderRequest(
+            symbol=symbol,
+            side=OrderSide(side.upper()),
+            cash_qty=Decimal(str(cash_amount)) if cash_amount is not None else None,
+            quantity=Decimal(str(quantity)) if quantity is not None else None,
+        )
+        await svc.auth.ensure_session()
+        preview = await svc.broker.preview_order(request)
+        return _ok(preview.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 async def cancel_order(order_id: str) -> dict:
     """Cancels an open order by its order_id."""
     svc = services()

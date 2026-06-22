@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 
 from ibkr_agent.domain.models import (
+    OrderPreview,
     OrderRequest,
     OrderResult,
     OrderSide,
@@ -21,6 +22,9 @@ class FakeBroker:
         self.placed.append(request)
         return OrderResult(order_id="real-1", status=OrderStatus.SUBMITTED,
                            symbol=request.symbol, side=request.side)
+
+    async def preview_order(self, request: OrderRequest) -> OrderPreview:
+        return OrderPreview(symbol=request.symbol, side=request.side)
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         return OrderResult(order_id=order_id, status=OrderStatus.CANCELLED,

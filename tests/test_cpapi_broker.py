@@ -93,6 +93,35 @@ async def test_quantity_order_body():
 
 
 @respx.mock
+async def test_preview_order_parses_whatif():
+    respx.post(f"{BASE}/iserver/account/{ACCT}/orders/whatif").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "amount": {"commission": "1.00", "total": "50.00"},
+                "initial": {"change": "10.00"},
+                "equity": {"change": "-1.00"},
+                "warn": "Heads up",
+            },
+        )
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    preview = await broker.preview_order(
+        OrderRequest(symbol="aapl", side=OrderSide.BUY, cash_qty=Decimal("50"))
+    )
+
+    assert preview.symbol == "AAPL"
+    assert preview.commission == Decimal("1.00")
+    assert preview.amount == Decimal("50.00")
+    assert preview.margin_change == Decimal("10.00")
+    assert preview.equity_change == Decimal("-1.00")
+    assert preview.warnings == ["Heads up"]
+    await client.aclose()
+
+
+@respx.mock
 async def test_fractional_quantity_sell_body():
     orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
         return_value=httpx.Response(200, json=[{"order_id": "10", "order_status": "Submitted"}])

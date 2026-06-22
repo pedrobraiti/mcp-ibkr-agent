@@ -82,6 +82,24 @@ class OrderResult(BaseModel):
     raw: dict | None = None
 
 
+class OrderPreview(BaseModel):
+    """Estimated impact of an order before it is sent (IBKR whatif).
+
+    Lets the agent reason about cost and margin before committing money. Parsed
+    fields are best-effort across IBKR response shapes; ``raw`` always carries the
+    full payload.
+    """
+
+    symbol: str
+    side: OrderSide
+    commission: Decimal | None = None
+    amount: Decimal | None = None
+    margin_change: Decimal | None = None
+    equity_change: Decimal | None = None
+    warnings: list[str] = []
+    raw: dict | None = None
+
+
 class Quote(BaseModel):
     symbol: str
     conid: int
