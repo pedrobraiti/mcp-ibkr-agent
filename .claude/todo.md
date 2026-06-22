@@ -3,7 +3,7 @@
 Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 
 ## Em progresso
-- [ ] **Keep-alive `/tickle` em background + alerta de reauth** (próximo passo rumo ao autônomo): manter a sessão viva e avisar quando cair (sem OAuth p/ varejo)
+- (nada em andamento — próxima tarefa abaixo)
 
 ## Próximas
 - [ ] Ao BLOQUEAR um warning fora da allow-list, enviar `Decline` (`reply` com `confirmed:false`) em vez de só não responder — hoje deixa uma ordem `Inactive` órfã na conta (vista no teste: 864501251/520/523)
@@ -31,3 +31,4 @@ Plano vivo do projeto. Tarefas e subtarefas, marcadas conforme concluídas.
 - [x] TESTE DE ORDEM REAL (mercado aberto, conta real): round-trip US$2 em AAPL. BUY via `cashQty` executou (0.0066 @ 298.96); allow-list de reply mapeada ao vivo (`o354`+`o10164`+`o10223`+`o10151`+`o10153`). Descoberta: `cashQty` é buy-only → venda fechada por quantidade fracionária exata (0.0066 @ 300.41); caixa recuperado (US$8.84, flat). Ver decisions.md 2026-06-22
 - [x] Venda fracionária: `OrderRequest.quantity` de `int` → `Decimal`; broker envia `float(quantity)`; guard de notional com Decimal; tools `buy`/`sell` aceitam quantidade fracionária (`sell` sem `cash_amount`, inválido na IBKR); nova tool `close_position(symbol)` que lê o tamanho exato e fecha 100%. Testes novos (fracionário no model e no broker; close_position no server). 21 testes, ruff limpo
 - [x] VALIDAÇÃO WIRED ao vivo (mercado aberto): chamadas reais das funções `buy`/`sell`/`close_position` do app. `buy` US$2 e `sell` 0.0066 passaram (round-trip, flat). `close_position` revelou fragilidade: depende do `/portfolio/positions`, eventualmente-consistente (ficou 0.0 por 30s+ após a compra). Endurecido: `get_positions` filtra linhas com quantidade 0 (também conserta contagem fantasma do healthcheck); novo `invalidate_positions()`; `close_position` invalida antes de ler e retorna mensagem honesta sobre o lag. 22 testes, ruff limpo
+- [x] Keep-alive `/tickle` + alerta de reauth: componente `session/SessionKeeper` (tickle no intervalo; recuperação leve via ensure_session quando connected-sem-auth; alerta sem spam quando cai) + runnable `python -m ibkr_agent.keepalive` (console script `ibkr-keepalive`) com bip e mensagem `[ALERTA]`. Testes unitários (5) + smoke ao vivo (tickle real, sem alerta). README com seção "Mantendo a sessão viva". 27 testes, ruff limpo

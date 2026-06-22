@@ -29,9 +29,9 @@ Arquitetura confirmada na prática (ver `.claude/decisions.md`): CPAPI + cashQty
 O `.env` fica com `TRADING_MODE=live`, `TRADING_ALLOW_LIVE=false`, `TRADING_DRY_RUN=true` → leitura segura. Para o teste real eu **NÃO** mexi no `.env`: passei `TRADING_ALLOW_LIVE=true TRADING_DRY_RUN=false` por variável de ambiente num script temporário (já deletado), preservando a trava.
 
 ## Próximo passo concreto
-**EM ANDAMENTO: keep-alive `/tickle` em background + alerta de reauth** — manter a sessão da live viva e avisar quando cair (sem OAuth p/ varejo). É o passo estrutural rumo ao agendado/autônomo.
-Já FEITO e validado ao vivo hoje: caminho wired `buy`/`sell`/`close_position` (chamando as funções reais do app com allow_live por env). `buy` US$2 e `sell` 0.0066 passaram (round-trip, flat). `close_position` foi endurecido após o teste expor que o `/portfolio/positions` é eventualmente-consistente (ficou 0.0 por 30s+ pós-compra): `get_positions` agora filtra linhas com qty 0, há `invalidate_positions()`, e `close_position` invalida antes de ler + mensagem honesta sobre o lag.
-Depois do keep-alive: enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); feriados no RTH. A skill `/invest` (decisão) é tarefa do usuário.
+**Keep-alive + alerta de reauth FEITO** (commit a seguir): componente `session/SessionKeeper` + runnable `python -m ibkr_agent.keepalive` (console script `ibkr-keepalive`). Faz tickle no intervalo, recuperação leve via `ensure_session` quando connected-sem-auth, e alerta (sem spam, com bip) quando cai e precisa relogar. 27 testes + smoke ao vivo (tickle real, sem alerta). README documentado.
+Também validado wired hoje: `buy`/`sell`/`close_position` (funções reais do app). `close_position` endurecido contra o cache eventual de `/portfolio/positions` (filtra qty 0, invalida antes de ler, mensagem honesta sobre o lag).
+Pendências (escolher a próxima): enviar `Decline` (confirmed:false) ao bloquear warning (não deixar ordem `Inactive` órfã); feriados no `is_market_open_now`; (opcional) integrar o SessionKeeper no lifespan do MCP server. A skill `/invest` (decisão) é tarefa do usuário.
 
 ## Em aberto / armadilhas
 - **`o2137`** (venda > posição) propositalmente FORA da allow-list global — auto-confirmar oversell é perigoso. Fechar posição = vender quantidade exata, sem o warning.
