@@ -93,6 +93,18 @@ async def get_quote(symbol: str) -> dict:
 
 
 @mcp.tool()
+async def get_quotes(symbols: list[str]) -> dict:
+    """Quotes for several US stock symbols at once (one snapshot — cheaper for a watchlist)."""
+    svc = services()
+    try:
+        await svc.auth.ensure_session()
+        quotes = await svc.market_data.get_quotes(symbols)
+        return _ok([q.model_dump(mode="json") for q in quotes])
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 async def account_summary() -> dict:
     """Account summary: available funds, net liquidation, buying power."""
     svc = services()
@@ -311,6 +323,36 @@ async def order_status(order_id: str) -> dict:
         await svc.auth.ensure_session()
         result = await svc.broker.get_order_status(order_id)
         return _ok(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+_TERMINAL_STATUSES = {"filled", "cancelled", "rejected"}
+_WAIT_POLL_SECONDS = 2.0
+_WAIT_MAX_TIMEOUT = 120.0
+
+
+@mcp.tool()
+async def wait_for_fill(order_id: str, timeout_seconds: float = 30.0) -> dict:
+    """Poll an order until it fills (or is cancelled/rejected), or the timeout elapses.
+
+    Closes the confirm-the-fill loop so the agent doesn't have to orchestrate the
+    retry itself. Returns the latest status with `timed_out` true if it was still
+    working when time ran out. `timeout_seconds` is capped at 120.
+    """
+    svc = services()
+    try:
+        await svc.auth.ensure_session()
+        deadline = max(0.0, min(timeout_seconds, _WAIT_MAX_TIMEOUT))
+        elapsed = 0.0
+        result = await svc.broker.get_order_status(order_id)
+        while result.status.value not in _TERMINAL_STATUSES and elapsed < deadline:
+            await asyncio.sleep(_WAIT_POLL_SECONDS)
+            elapsed += _WAIT_POLL_SECONDS
+            result = await svc.broker.get_order_status(order_id)
+        payload = result.model_dump(mode="json")
+        payload["timed_out"] = result.status.value not in _TERMINAL_STATUSES
+        return _ok(payload)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

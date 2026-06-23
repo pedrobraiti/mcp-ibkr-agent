@@ -93,12 +93,18 @@ sequence is always: restart the gateway → then log in.
 
 ## Using Valet day to day
 
-- Tools: `session_status`, `market_status`, `get_quote`, `account_summary`,
-  `positions`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`.
-- `buy` takes `cash_amount` (USD, fractional) or `quantity`. `sell` takes `quantity`
-  (IBKR doesn't allow selling by dollar amount). `close_position(symbol)` exits 100%.
-- Keep the session warm with `python -m ibkr_agent.keepalive` (`ibkr-keepalive`). It
-  alerts (`[ALERT] Reauthentication required: ...`) when the user must log in again.
+- Tools: `session_status`, `market_status`, `get_quote`, `get_quotes`,
+  `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`,
+  `close_position`, `stop_order`, `bracket_order`, `order_status`, `wait_for_fill`,
+  `cancel_order`, `open_orders`, `trade_history`.
+- `buy` takes `cash_amount` (USD, fractional) or `quantity`, plus optional `limit_price`.
+  `sell` takes `quantity` (IBKR doesn't allow selling by dollar amount). `close_position(symbol)`
+  exits 100%. `stop_order`/`bracket_order` add stop-loss and entry+exit (OCO) protection.
+- `preview_order` estimates cost/margin via IBKR's whatif before sending. `order_status`
+  (and `wait_for_fill`) confirm a fill; `trade_history` is the local audit log.
+- The MCP server keeps its own session warm (background `/tickle`). For headless/scheduled
+  use, run `python -m ibkr_agent.keepalive` (`ibkr-keepalive`). It alerts
+  (`[ALERT] Reauthentication required: ...`) when the user must log in again.
 
 ## Safety — read before placing any order
 

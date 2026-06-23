@@ -65,6 +65,34 @@ async def test_get_quote_handles_snapshot_warmup():
 
 
 @respx.mock
+async def test_get_quotes_batches_symbols_in_one_snapshot():
+    respx.get(f"{BASE}/trsrv/stocks", params={"symbols": "AAPL"}).mock(
+        return_value=httpx.Response(
+            200, json={"AAPL": [{"contracts": [{"conid": 1, "isUS": True}]}]})
+    )
+    respx.get(f"{BASE}/trsrv/stocks", params={"symbols": "MSFT"}).mock(
+        return_value=httpx.Response(
+            200, json={"MSFT": [{"contracts": [{"conid": 2, "isUS": True}]}]})
+    )
+    snapshot = respx.get(f"{BASE}/iserver/marketdata/snapshot").mock(
+        return_value=httpx.Response(200, json=[
+            {"conid": 1, "31": "150.00"},
+            {"conid": 2, "31": "400.00"},
+        ])
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+
+    quotes = await md.get_quotes(["aapl", "msft"])
+
+    assert {q.symbol: q.last_price for q in quotes} == {
+        "AAPL": Decimal("150.00"), "MSFT": Decimal("400.00")
+    }
+    assert snapshot.call_count == 1  # both symbols in a single snapshot call
+    await client.aclose()
+
+
+@respx.mock
 async def test_get_positions_skips_zero_quantity_rows():
     respx.get(f"{BASE}/portfolio/{ACCT}/positions/0").mock(
         return_value=httpx.Response(

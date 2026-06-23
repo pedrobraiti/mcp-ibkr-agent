@@ -26,9 +26,11 @@ async def test_tools_are_registered():
         "session_status",
         "market_status",
         "get_quote",
+        "get_quotes",
         "account_summary",
         "positions",
         "portfolio",
+        "wait_for_fill",
         "buy",
         "sell",
         "close_position",
@@ -60,6 +62,9 @@ class _FakeMarketData:
 
     async def get_quote(self, symbol: str) -> Quote:
         return Quote(symbol=symbol, conid=1, last_price=Decimal("10"))
+
+    async def get_quotes(self, symbols: list[str]) -> list[Quote]:
+        return [Quote(symbol=s.upper(), conid=1, last_price=Decimal("10")) for s in symbols]
 
     async def get_account_summary(self) -> AccountSummary:
         return AccountSummary(account_id="DU1", available_funds=Decimal("100"))
@@ -209,3 +214,31 @@ async def test_bracket_order_through_tool(tmp_path, monkeypatch):
     assert out["ok"] is True
     legs = {leg["message"] for leg in out["data"]}
     assert legs == {"entry", "take_profit", "stop_loss"}
+
+
+async def test_get_quotes_batch(monkeypatch):
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=_FakeMarketData(), broker=None,
+                   journal=TradeJournal("logs/unused.jsonl"))
+    monkeypatch.setattr(app, "_services", svc)
+
+    out = await app.get_quotes(["aapl", "msft"])
+    assert out["ok"] is True
+    assert {q["symbol"] for q in out["data"]} == {"AAPL", "MSFT"}
+
+
+async def test_wait_for_fill_returns_on_terminal_status(monkeypatch):
+    # _FakeInner.get_order_status returns FILLED, so it resolves on the first poll.
+    broker = GuardedBroker(
+        _FakeInner(), _FakeMarketData(), mode=TradingMode.PAPER, allow_live=False,
+        dry_run=True, max_order_value=Decimal("1000"), require_market_open=False,
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=_FakeMarketData(), broker=broker,
+                   journal=TradeJournal("logs/unused.jsonl"))
+    monkeypatch.setattr(app, "_services", svc)
+
+    out = await app.wait_for_fill("x", timeout_seconds=5)
+    assert out["ok"] is True
+    assert out["data"]["status"] == "filled"
+    assert out["data"]["timed_out"] is False

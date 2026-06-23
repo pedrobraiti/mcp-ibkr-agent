@@ -131,6 +131,16 @@ async def test_stop_loss_over_limit_is_allowed():
     assert len(broker.placed) == 1
 
 
+async def test_buy_blocked_when_quote_missing_for_quantity():
+    # Without a price the notional can't be validated, so a quantity BUY must be blocked
+    # (the daily cap relies on the same notional) — fail safe rather than send blind.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(None))
+    with pytest.raises(SafetyError, match="No price"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1))
+    assert broker.placed == []
+
+
 async def test_market_closed_blocks():
     guarded = _guarded(
         FakeBroker(), FakeMarketData(Decimal("10")),

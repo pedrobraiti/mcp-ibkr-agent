@@ -65,6 +65,47 @@ class CpapiMarketData:
             ask=_to_decimal(snapshot.get(FIELD_ASK)),
         )
 
+    async def get_quotes(self, symbols: list[str]) -> list[Quote]:
+        """Quotes for several symbols in one snapshot call (cheaper than N get_quote)."""
+        conid_by_symbol: dict[str, int] = {}
+        for symbol in symbols:
+            conid = await self.resolve_conid(symbol)
+            if conid is not None:
+                conid_by_symbol[symbol.upper()] = conid
+        if not conid_by_symbol:
+            return []
+
+        params = {
+            "conids": ",".join(str(c) for c in conid_by_symbol.values()),
+            "fields": _SNAPSHOT_FIELDS,
+        }
+        snapshots: dict[int, dict] = {}
+        # Warmup: the 1st call starts the streams and returns no prices; retry until filled.
+        for attempt in range(_SNAPSHOT_MAX_ATTEMPTS):
+            data = await self._client.get("/iserver/marketdata/snapshot", params=params)
+            if isinstance(data, list):
+                for row in data:
+                    if isinstance(row, dict) and FIELD_LAST in row and row.get("conid"):
+                        snapshots[int(row["conid"])] = row
+            if len(snapshots) >= len(conid_by_symbol):
+                break
+            if attempt < _SNAPSHOT_MAX_ATTEMPTS - 1:
+                await asyncio.sleep(self._warmup_delay)
+
+        quotes: list[Quote] = []
+        for symbol, conid in conid_by_symbol.items():
+            snapshot = snapshots.get(conid, {})
+            quotes.append(
+                Quote(
+                    symbol=symbol,
+                    conid=conid,
+                    last_price=_to_decimal(snapshot.get(FIELD_LAST)),
+                    bid=_to_decimal(snapshot.get(FIELD_BID)),
+                    ask=_to_decimal(snapshot.get(FIELD_ASK)),
+                )
+            )
+        return quotes
+
     async def get_account_summary(self) -> AccountSummary:
         data = await self._client.get(f"/portfolio/{self._account_id}/summary")
         data = data if isinstance(data, dict) else {}

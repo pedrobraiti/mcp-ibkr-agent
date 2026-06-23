@@ -3,6 +3,18 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.2.2] - 2026-06-23
+
+### Added
+- **`get_quotes(symbols)`** — quote a whole watchlist in one snapshot call instead of
+  one round-trip per symbol. Live-validated.
+- **`wait_for_fill(order_id, timeout_seconds)`** — poll an order until it fills (or is
+  cancelled/rejected), closing the confirm-the-fill loop so the agent doesn't have to
+  orchestrate the retry. Bounded (timeout capped at 120s).
+
+### Docs
+- `CLAUDE.md`'s day-to-day tool list was stale (10 tools); now lists all 18.
+
 ## [0.2.1] - 2026-06-23
 
 ### Fixed
@@ -56,6 +68,7 @@ First working release, validated live against a real IBKR account.
 - **Keep-alive** session loop with a reauth alert (`ibkr-keepalive`).
 - **Healthcheck** for connection/account (`ibkr-healthcheck`).
 
+[0.2.2]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.1.0

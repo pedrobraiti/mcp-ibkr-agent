@@ -41,6 +41,10 @@ class MarketDataPort(Protocol):
     async def get_quote(self, symbol: str) -> Quote | None:
         ...
 
+    async def get_quotes(self, symbols: list[str]) -> list[Quote]:
+        """Quotes for several symbols in one call."""
+        ...
+
     async def get_account_summary(self) -> AccountSummary:
         ...
 
