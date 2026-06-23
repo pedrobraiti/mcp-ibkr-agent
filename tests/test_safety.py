@@ -106,6 +106,31 @@ async def test_quantity_notional_uses_quote():
     assert broker.placed == []
 
 
+async def test_sell_over_limit_is_allowed():
+    # The value cap is a spend limit: it gates BUYS. A SELL/exit larger than the
+    # limit must NOT be blocked, or a big position couldn't be closed or protected.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60")))  # 5 * 60 = 300 > 100
+    result = await guarded.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)
+    )
+    assert result.order_id == "real-1"
+    assert len(broker.placed) == 1
+
+
+async def test_stop_loss_over_limit_is_allowed():
+    from ibkr_agent.domain.models import OrderType
+
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60")))  # 5 * 60 = 300 > 100
+    result = await guarded.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5,
+                     order_type=OrderType.STOP, stop_price=Decimal("55"))
+    )
+    assert result.order_id == "real-1"
+    assert len(broker.placed) == 1
+
+
 async def test_market_closed_blocks():
     guarded = _guarded(
         FakeBroker(), FakeMarketData(Decimal("10")),

@@ -3,6 +3,14 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.2.1] - 2026-06-23
+
+### Fixed
+- **The value cap no longer blocks exits.** `MAX_ORDER_VALUE` is a spend limit, so it
+  now applies to BUYS only — sells, `close_position`, and stop-losses larger than the
+  limit are allowed, otherwise a position bigger than the cap could not be closed or
+  protected.
+
 ## [0.2.0] - 2026-06-23
 
 A loop-closing release: the agent can now confirm fills, set prices, attach risk, and
@@ -48,5 +56,6 @@ First working release, validated live against a real IBKR account.
 - **Keep-alive** session loop with a reauth alert (`ibkr-keepalive`).
 - **Healthcheck** for connection/account (`ibkr-healthcheck`).
 
+[0.2.1]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.1.0

@@ -189,7 +189,7 @@ Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an 
 
 - **paper** by default; **live** blocked unless `TRADING_ALLOW_LIVE=true`.
 - **dry-run** on by default (no real order is sent).
-- Orders above `MAX_ORDER_VALUE` are rejected.
+- **Buys** above `MAX_ORDER_VALUE` are rejected (it's a spend cap; exits — sells, closes, stop-losses — aren't value-gated, so a large position can always be closed or protected).
 - Orders only during regular trading hours (RTH), accounting for **NYSE holidays** (via the `holidays` lib).
 - CPAPI confirmation warnings are auto-accepted only through an allow-list; an unknown warning **blocks** the order.
 - Optional **daily spend cap** (`MAX_DAILY_VALUE`) across all buys, tracked in the audit log — not just per-order.

@@ -157,8 +157,11 @@ order in `GuardedBroker`, plus a preview step and an audit trail:
 
 - **Preview before commit.** `preview_order` (IBKR `whatif`) estimates margin impact,
   commission and warnings *without sending*, so the agent can reason about cost first.
-- **Per-order limit** (`MAX_ORDER_VALUE`) and an optional **cumulative daily cap**
-  (`MAX_DAILY_VALUE`) — many small buys can't sneak past a per-order limit.
+- **Per-order spend limit** (`MAX_ORDER_VALUE`) and an optional **cumulative daily cap**
+  (`MAX_DAILY_VALUE`) — many small buys can't sneak past a per-order limit. Both gate
+  *spending*, so they apply to **buys only**: exits (sells, closes, stop-losses) reduce
+  exposure and are never value-blocked, otherwise a position larger than the limit could
+  not be closed or protected.
 - **Duplicate guard.** An identical order within `DUPLICATE_WINDOW_SECONDS` is
   rejected, so a timeout-and-retry can't double-buy.
 - **Symbol allow/deny list.** Restricts the universe the agent can touch.

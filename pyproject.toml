@@ -1,6 +1,6 @@
 [project]
 name = "mcp-ibkr-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for an AI agent to trade on Interactive Brokers (quotes, positions, whole/fractional orders via cashQty, plus limit/stop/bracket)."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -3,7 +3,7 @@
 ``GuardedBroker`` is a decorator over ``BrokerPort``: it applies the hard rules BEFORE
 delegating to the real broker. Rules:
   1. Live only with ``allow_live=True`` (otherwise blocked).
-  2. The order's notional must not exceed ``max_order_value``.
+  2. A BUY's notional must not exceed ``max_order_value`` (exits aren't value-capped).
   3. Cumulative daily spend must not exceed ``max_daily_value`` (if set).
   4. An identical order within ``duplicate_window_seconds`` is rejected (idempotency).
   5. The market must be open (RTH), if required.
@@ -135,7 +135,14 @@ class GuardedBroker:
             )
 
         notional = await self._notional(request)
-        if notional is not None and notional > self._max_order_value:
+        # The value limit caps how much is *spent* — it applies to entries (BUYS).
+        # Exits (sells, closes, stop-losses) reduce exposure, so capping them could
+        # trap a position larger than the limit; they are not value-gated.
+        if (
+            request.side is OrderSide.BUY
+            and notional is not None
+            and notional > self._max_order_value
+        ):
             raise SafetyError(
                 f"Order of ~US${notional} exceeds the MAX_ORDER_VALUE limit "
                 f"(US${self._max_order_value})."
