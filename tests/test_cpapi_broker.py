@@ -136,12 +136,15 @@ async def test_limit_order_body_carries_price():
 
 @respx.mock
 async def test_get_order_status_parses_fill():
+    # Field shape captured live from /iserver/account/order/status/{id}:
+    # `symbol` (not ticker), `side` as "B"/"S", `cum_fill`, `order_status`.
     respx.get(f"{BASE}/iserver/account/order/status/123").mock(
         return_value=httpx.Response(
             200,
             json={
-                "order_id": 123, "order_status": "Filled", "ticker": "AAPL",
-                "side": "B", "cum_fill": "0.0066", "average_price": "298.96",
+                "order_id": 123, "order_status": "Filled", "symbol": "AAPL",
+                "contract_description_1": "AAPL", "side": "B", "size": "0.0066",
+                "cum_fill": "0.0066", "average_price": "298.96", "order_type": "LIMIT",
             },
         )
     )

@@ -193,12 +193,15 @@ manual command.
 
 - **`order_status(order_id)`** reads `/iserver/account/order/status/{id}` and returns
   the state, filled quantity and average price — so the agent confirms a fill directly
-  instead of polling positions. Parsed defensively (full `raw` kept), like `whatif`.
+  instead of polling positions. Validated live: the endpoint uses `symbol`, `side`
+  (`"B"`/`"S"`), `cum_fill` and `order_status`; the full `raw` is kept regardless.
 - **LIMIT orders.** `buy`/`sell`/`preview_order` accept an optional `limit_price`
   (market by default). LIMIT requires `quantity` — `cashQty` is market-only, so a
-  `limit_price` + `cash_amount` combination is rejected up front. A limit order may
-  surface a confirmation IBKR hasn't been allow-listed for yet; consistent with the
-  safety design, an unmapped warning **blocks** the order rather than auto-confirming.
+  `limit_price` + `cash_amount` combination is rejected up front. Validated live: a
+  deliberate limit placed away from the market triggers IBKR's `o163` ("price exceeds
+  the percentage constraint") confirmation, now allow-listed alongside the existing
+  precautions. Any *other*, unmapped warning still **blocks** the order rather than
+  auto-confirming — consistent with the safety design.
 - **In-server keep-alive.** The MCP server runs a background `/tickle` on its lifespan,
   so interactive use needs no separate process. The standalone `ibkr-keepalive` stays
   for headless/scheduled use. Neither can log in for a retail account — they only

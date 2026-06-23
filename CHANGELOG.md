@@ -10,6 +10,8 @@ versioning follows [SemVer](https://semver.org/).
   average price after `buy`/`sell` (positions lag right after a trade).
 - **LIMIT orders** — `buy`/`sell`/`preview_order` accept an optional `limit_price`
   (market by default; LIMIT requires `quantity`, since `cashQty` is market-only).
+  Live-validated; IBKR's `o163` percentage-constraint confirmation is allow-listed so
+  deliberate away-from-market limits aren't spuriously blocked.
 - **In-server keep-alive** — the MCP server now runs a background `/tickle` on its
   lifespan, so interactive use no longer needs the standalone `ibkr-keepalive`.
 - GitHub issue/PR templates.

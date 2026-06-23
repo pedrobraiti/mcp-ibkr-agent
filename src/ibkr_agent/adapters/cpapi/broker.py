@@ -25,15 +25,17 @@ from ...domain.models import (
 from .client import CpapiClient, CpapiError
 
 # Benign warnings accepted by default — standard CPAPI precaution confirmations
-# for our order type (MKT + cashQty). The API itself marks them all as
+# for our order types (MKT + cashQty, and LMT). The API itself marks them all as
 # isSuppressible=true / "Accept and Continue". Mapped live on the real account:
 #   o354   "order without market data" (no data subscription)
+#   o163   limit price exceeds the percentage constraint vs. the market — expected
+#          for a deliberate LIMIT order placed away from the current price
 #   o10164 Market Order Confirmation (market-order risk — we use MKT on purpose)
 #   o10223 Confirm Mandatory Cap Price (IB may apply a protective cap/floor)
 #   o10151 disclaimer: trader's responsibility over cash quantity details
 #   o10153 Cash Quantity Order Confirmation (cashQty is simulated: cancels once the amount is spent)
 DEFAULT_ACCEPTED_MESSAGE_IDS = frozenset(
-    {"o354", "o10164", "o10223", "o10151", "o10153"}
+    {"o354", "o163", "o10164", "o10223", "o10151", "o10153"}
 )
 
 _MAX_REPLY_ROUNDS = 5
