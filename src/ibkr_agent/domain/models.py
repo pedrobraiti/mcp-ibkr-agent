@@ -25,6 +25,8 @@ class OrderSide(StrEnum):
 class OrderType(StrEnum):
     MARKET = "MKT"
     LIMIT = "LMT"
+    STOP = "STP"
+    STOP_LIMIT = "STOP_LIMIT"
 
 
 class TradingMode(StrEnum):
@@ -54,18 +56,43 @@ class OrderRequest(BaseModel):
         default=None, gt=0, description="Amount in US$ (fractional via cashQty)."
     )
     limit_price: Decimal | None = Field(default=None, gt=0)
+    stop_price: Decimal | None = Field(
+        default=None, gt=0, description="Trigger price for STOP / STOP_LIMIT orders."
+    )
 
     @model_validator(mode="after")
-    def _exactly_one_sizing(self) -> OrderRequest:
+    def _validate(self) -> OrderRequest:
         if (self.quantity is None) == (self.cash_qty is None):
             raise ValueError("Provide exactly one of 'quantity' and 'cash_qty'.")
-        if self.order_type is OrderType.LIMIT and self.limit_price is None:
-            raise ValueError("A LIMIT order requires 'limit_price'.")
+        if self.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and self.limit_price is None:
+            raise ValueError(f"A {self.order_type.value} order requires 'limit_price'.")
+        if self.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and self.stop_price is None:
+            raise ValueError(f"A {self.order_type.value} order requires 'stop_price'.")
         return self
 
     @property
     def is_fractional(self) -> bool:
         return self.cash_qty is not None
+
+
+class BracketRequest(BaseModel):
+    """An entry order with attached take-profit and stop-loss exits (OCO).
+
+    The two exits are submitted as children of the entry: when one fills the other
+    is cancelled. The entry must be sized by ``quantity`` (not ``cash_qty``) — the
+    exits need a definite share count, which a dollar-amount entry can't give until
+    it fills.
+    """
+
+    entry: OrderRequest
+    take_profit_price: Decimal = Field(gt=0, description="Limit price of the profit exit.")
+    stop_loss_price: Decimal = Field(gt=0, description="Stop trigger price of the loss exit.")
+
+    @model_validator(mode="after")
+    def _entry_uses_quantity(self) -> BracketRequest:
+        if self.entry.quantity is None:
+            raise ValueError("A bracket entry must be sized by 'quantity', not 'cash_qty'.")
+        return self
 
 
 class OrderResult(BaseModel):

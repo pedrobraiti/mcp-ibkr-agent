@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 from ...domain.models import (
+    BracketRequest,
     OrderPreview,
     OrderRequest,
     OrderResult,
@@ -38,7 +39,8 @@ DEFAULT_ACCEPTED_MESSAGE_IDS = frozenset(
     {"o354", "o163", "o10164", "o10223", "o10151", "o10153"}
 )
 
-_MAX_REPLY_ROUNDS = 5
+# A bracket submits 3 orders, each able to raise its own precaution — allow more rounds.
+_MAX_REPLY_ROUNDS = 12
 
 _STATUS_MAP = {
     "submitted": OrderStatus.SUBMITTED,
@@ -91,6 +93,52 @@ class CpapiBroker:
         )
         return _parse_preview(response, request)
 
+    async def place_bracket(self, bracket: BracketRequest) -> list[OrderResult]:
+        entry = bracket.entry
+        conid = await self._resolve_conid(entry.symbol)
+        if conid is None:
+            raise CpapiError(f"Could not resolve the conid for {entry.symbol}.")
+
+        parent = self._build_order(entry, conid)
+        exit_side = OrderSide.SELL if entry.side is OrderSide.BUY else OrderSide.BUY
+        quantity = float(entry.quantity)
+        # Both exits carry their trigger in `price` (LMT = limit, STP = stop trigger).
+        take_profit = self._child_order(
+            conid, exit_side, quantity, parent["cOID"], OrderType.LIMIT,
+            price=float(bracket.take_profit_price),
+        )
+        stop_loss = self._child_order(
+            conid, exit_side, quantity, parent["cOID"], OrderType.STOP,
+            price=float(bracket.stop_loss_price),
+        )
+
+        legs = [
+            ("entry", parent, entry.side),
+            ("take_profit", take_profit, exit_side),
+            ("stop_loss", stop_loss, exit_side),
+        ]
+        payload = {"orders": [parent, take_profit, stop_loss]}
+        response = await self._client.post(
+            f"/iserver/account/{self._account_id}/orders", json=payload
+        )
+        response = await self._resolve_replies(response)
+        return _parse_bracket_acks(response, entry.symbol, legs)
+
+    def _child_order(
+        self, conid: int, side: OrderSide, quantity: float, parent_coid: str,
+        order_type: OrderType, *, price: float,
+    ) -> dict:
+        return {
+            "conid": conid,
+            "orderType": order_type.value,
+            "side": side.value,
+            "quantity": quantity,
+            "price": price,
+            "tif": "GTC",
+            "cOID": self._id_factory(),
+            "parentId": parent_coid,
+        }
+
     async def get_order_status(self, order_id: str) -> OrderResult:
         data = await self._client.get(f"/iserver/account/order/status/{order_id}")
         return _order_status_to_result(data, order_id)
@@ -138,8 +186,17 @@ class CpapiBroker:
             order["cashQty"] = float(request.cash_qty)
         else:
             order["quantity"] = float(request.quantity)
-        if request.order_type is OrderType.LIMIT and request.limit_price is not None:
+        # CPAPI price-field convention (validated live):
+        #   LMT        → price = limit
+        #   STP        → price = stop trigger (NOT auxPrice)
+        #   STOP_LIMIT → price = limit, auxPrice = stop trigger
+        if request.order_type is OrderType.LIMIT and request.limit_price:
             order["price"] = float(request.limit_price)
+        elif request.order_type is OrderType.STOP and request.stop_price:
+            order["price"] = float(request.stop_price)
+        elif request.order_type is OrderType.STOP_LIMIT:
+            order["price"] = float(request.limit_price)
+            order["auxPrice"] = float(request.stop_price)
         return order
 
     async def _resolve_replies(self, response: object) -> object:
@@ -278,6 +335,35 @@ def _live_order_to_result(order: dict) -> OrderResult:
         message=order.get("orderDesc"),
         raw=order,
     )
+
+
+def _parse_bracket_acks(
+    response: object, symbol: str, legs: list[tuple[str, dict, OrderSide]]
+) -> list[OrderResult]:
+    """Map each order ack back to its bracket leg (entry / take_profit / stop_loss).
+
+    Acks carry ``local_order_id`` (the cOID we sent), so each one is matched to the
+    leg that produced it; the leg name is surfaced in ``message`` so the agent can
+    tell the entry from its two exits.
+    """
+    acks = response if isinstance(response, list) else [response]
+    by_coid = {leg[1]["cOID"]: leg for leg in legs}
+    results: list[OrderResult] = []
+    for ack in acks:
+        if not isinstance(ack, dict):
+            continue
+        role, _order, side = by_coid.get(str(ack.get("local_order_id") or ""), (None, None, None))
+        results.append(
+            OrderResult(
+                order_id=str(ack.get("order_id") or ""),
+                status=_map_status(ack.get("order_status")),
+                symbol=symbol.upper(),
+                side=side or _to_side(ack.get("side")),
+                message=role or ack.get("text"),
+                raw=ack,
+            )
+        )
+    return results
 
 
 def _order_status_to_result(response: object, order_id: str) -> OrderResult:

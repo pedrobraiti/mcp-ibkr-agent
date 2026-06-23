@@ -15,7 +15,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..domain.models import OrderRequest, OrderSide, OrderType
+from ..domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
 from ..keepalive import _alert
 from ..session import SessionKeeper
 from .services import Services, build_services
@@ -194,6 +194,76 @@ async def close_position(symbol: str) -> dict:
         request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
         result = await svc.broker.place_order(request)
         return _ok(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+async def stop_order(
+    symbol: str,
+    side: str,
+    quantity: float,
+    stop_price: float,
+    limit_price: float | None = None,
+) -> dict:
+    """Place a STOP order (e.g. a stop-loss). Triggers a market order when `stop_price` is hit.
+
+    `side` is "BUY" or "SELL" (a stop-loss on a long position is a SELL). Pass
+    `limit_price` to make it a STOP-LIMIT (becomes a limit order on trigger instead
+    of a market order). Sized by `quantity` (shares).
+    """
+    svc = services()
+    try:
+        order_type = OrderType.STOP_LIMIT if limit_price is not None else OrderType.STOP
+        request = OrderRequest(
+            symbol=symbol,
+            side=OrderSide(side.upper()),
+            order_type=order_type,
+            quantity=Decimal(str(quantity)),
+            stop_price=Decimal(str(stop_price)),
+            limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
+        )
+        await svc.auth.ensure_session()
+        result = await svc.broker.place_order(request)
+        return _ok(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+async def bracket_order(
+    symbol: str,
+    quantity: float,
+    take_profit: float,
+    stop_loss: float,
+    side: str = "BUY",
+    entry_limit_price: float | None = None,
+) -> dict:
+    """Place an entry order with attached take-profit and stop-loss exits (OCO).
+
+    The entry buys (or sells) `quantity` shares — market by default, or a limit if
+    `entry_limit_price` is set. Once it fills, two exits go live: a limit at
+    `take_profit` and a stop at `stop_loss`; when one fills the other is cancelled.
+    Returns one result per leg (labelled entry / take_profit / stop_loss in `message`).
+    """
+    svc = services()
+    try:
+        entry_type = OrderType.LIMIT if entry_limit_price is not None else OrderType.MARKET
+        entry = OrderRequest(
+            symbol=symbol,
+            side=OrderSide(side.upper()),
+            order_type=entry_type,
+            quantity=Decimal(str(quantity)),
+            limit_price=Decimal(str(entry_limit_price)) if entry_limit_price is not None else None,
+        )
+        bracket = BracketRequest(
+            entry=entry,
+            take_profit_price=Decimal(str(take_profit)),
+            stop_loss_price=Decimal(str(stop_loss)),
+        )
+        await svc.auth.ensure_session()
+        results = await svc.broker.place_bracket(bracket)
+        return _ok([r.model_dump(mode="json") for r in results])
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

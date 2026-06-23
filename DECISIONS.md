@@ -210,3 +210,33 @@ manual command.
 **Why.** These are the difference between "the plumbing exists" and "an agent trades
 without friction": confirm the fill, set a price, and don't drop the session mid-session
 — without weakening any of the ADR-009 guards (they all still sit on the order path).
+
+---
+
+## ADR-011 — Stop and bracket orders, with risk attached to the entry
+
+**Context.** Market and limit orders let an agent *enter* a position, but not protect
+one. A stop-loss and a take-profit are the basic risk tools; a bracket binds them to an
+entry so the protection is in place the moment the entry fills.
+
+**Decision.**
+
+- **`stop_order`** places a STOP (market-on-trigger) or STOP-LIMIT. CPAPI's price-field
+  convention is non-obvious and was confirmed live: a plain STOP carries its trigger in
+  `price` (sending `auxPrice` is rejected with "Invalid order price fields"); a
+  STOP-LIMIT uses `price` for the limit and `auxPrice` for the trigger.
+- **`bracket_order`** submits the entry plus two children — a take-profit limit and a
+  stop-loss — as one payload, with each child's `parentId` set to the entry's `cOID`.
+  IBKR links them into an OCA group (confirmed live: the children come back with a
+  shared `ocaGroupId`), so when one exit fills the other is cancelled. The entry must be
+  sized by `quantity` (not `cashQty`): the exits need a definite share count, which a
+  dollar-amount entry can't provide until it fills.
+- **Guarding the entry.** A bracket runs through the same `GuardedBroker` checks as any
+  order, applied to the *entry* (the leg that spends money); the exits ride along in the
+  same submission. The guard logic is shared between `place_order` and `place_bracket`.
+
+**Why.** Stop/bracket are the natural completion of the execution surface — an agent can
+now enter *and* define its exit in one call. The CPAPI field quirks here are exactly the
+kind of thing that only surfaces against the real API, so both paths were validated live
+(a non-triggering stop and a non-filling bracket, then cancelled); the unit tests pin the
+exact order bodies so regressions can't slip the field convention.

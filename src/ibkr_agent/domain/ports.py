@@ -10,6 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from .models import (
     AccountSummary,
+    BracketRequest,
     OrderPreview,
     OrderRequest,
     OrderResult,
@@ -56,6 +57,10 @@ class BrokerPort(Protocol):
     """Execution: place, query and cancel orders."""
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
+        ...
+
+    async def place_bracket(self, bracket: BracketRequest) -> list[OrderResult]:
+        """Place an entry order with attached take-profit and stop-loss exits (OCO)."""
         ...
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:

@@ -23,6 +23,11 @@ class FakeBroker:
         return OrderResult(order_id="real-1", status=OrderStatus.SUBMITTED,
                            symbol=request.symbol, side=request.side)
 
+    async def place_bracket(self, bracket) -> list[OrderResult]:
+        self.placed.append(bracket.entry)
+        return [OrderResult(order_id="b-1", status=OrderStatus.SUBMITTED,
+                            symbol=bracket.entry.symbol, side=bracket.entry.side)]
+
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         return OrderPreview(symbol=request.symbol, side=request.side)
 

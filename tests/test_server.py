@@ -32,6 +32,8 @@ async def test_tools_are_registered():
         "buy",
         "sell",
         "close_position",
+        "stop_order",
+        "bracket_order",
         "preview_order",
         "order_status",
         "cancel_order",
@@ -77,6 +79,17 @@ class _FakeInner:
         self.placed.append(request)
         return OrderResult(order_id="x", status=OrderStatus.SUBMITTED,
                            symbol=request.symbol, side=request.side)
+
+    async def place_bracket(self, bracket) -> list[OrderResult]:
+        self.placed.append(bracket.entry)
+        return [
+            OrderResult(order_id="p", status=OrderStatus.SUBMITTED,
+                        symbol=bracket.entry.symbol, side=bracket.entry.side, message="entry"),
+            OrderResult(order_id="tp", status=OrderStatus.SUBMITTED,
+                        symbol=bracket.entry.symbol, side=OrderSide.SELL, message="take_profit"),
+            OrderResult(order_id="sl", status=OrderStatus.SUBMITTED,
+                        symbol=bracket.entry.symbol, side=OrderSide.SELL, message="stop_loss"),
+        ]
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         return OrderPreview(symbol=request.symbol, side=request.side)
@@ -160,3 +173,39 @@ async def test_limit_buy_builds_limit_order(tmp_path, monkeypatch):
     rejected = await app.buy("AAPL", cash_amount=10, limit_price=9.5)
     assert rejected["ok"] is False
     assert "quantity" in rejected["error"]
+
+
+async def test_stop_order_builds_stop(tmp_path, monkeypatch):
+    inner = _FakeInner()
+    md = _FakeMarketData()
+    broker = GuardedBroker(
+        inner, md, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal(tmp_path / "t.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=md, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    ok = await app.stop_order("AAPL", side="SELL", quantity=1, stop_price=8.0)
+    assert ok["ok"] is True
+    assert inner.placed[-1].order_type.value == "STP"
+    assert inner.placed[-1].stop_price == Decimal("8.0")
+
+
+async def test_bracket_order_through_tool(tmp_path, monkeypatch):
+    inner = _FakeInner()
+    md = _FakeMarketData()
+    broker = GuardedBroker(
+        inner, md, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal(tmp_path / "t.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=md, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    out = await app.bracket_order("AAPL", quantity=1, take_profit=12.0, stop_loss=8.0)
+    assert out["ok"] is True
+    legs = {leg["message"] for leg in out["data"]}
+    assert legs == {"entry", "take_profit", "stop_loss"}

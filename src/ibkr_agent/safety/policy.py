@@ -19,6 +19,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 from ..domain.models import (
+    BracketRequest,
     OrderPreview,
     OrderRequest,
     OrderResult,
@@ -71,40 +72,7 @@ class GuardedBroker:
     async def place_order(self, request: OrderRequest) -> OrderResult:
         notional: Decimal | None = None
         try:
-            if self._mode is TradingMode.LIVE and not self._allow_live:
-                raise SafetyError(
-                    "LIVE mode blocked: set TRADING_ALLOW_LIVE=true to trade with real money."
-                )
-
-            symbol = request.symbol.upper()
-            if symbol in self._symbol_denylist:
-                raise SafetyError(f"Symbol {symbol} is on the deny-list.")
-            if self._symbol_allowlist and symbol not in self._symbol_allowlist:
-                raise SafetyError(f"Symbol {symbol} is not on the allow-list.")
-
-            if self._require_market_open and not self._is_market_open():
-                raise SafetyError(
-                    "Market closed: orders are only accepted during regular trading hours (RTH)."
-                )
-
-            notional = await self._notional(request)
-            if notional is not None and notional > self._max_order_value:
-                raise SafetyError(
-                    f"Order of ~US${notional} exceeds the MAX_ORDER_VALUE limit "
-                    f"(US${self._max_order_value})."
-                )
-
-            if self._journal is not None and self._journal.has_recent_duplicate(
-                request, self._duplicate_window_seconds
-            ):
-                raise SafetyError(
-                    f"Duplicate order blocked: an identical {request.side.value} "
-                    f"{request.symbol.upper()} was just placed "
-                    f"(within {self._duplicate_window_seconds:g}s)."
-                )
-
-            self._check_daily_limit(request, notional)
-
+            notional = await self._run_guards(request)
             if self._dry_run:
                 result = OrderResult(
                     status=OrderStatus.PENDING,
@@ -121,6 +89,69 @@ class GuardedBroker:
         except Exception as exc:  # noqa: BLE001 - record the failed attempt, then re-raise
             self._record(request, notional, error=exc)
             raise
+
+    async def place_bracket(self, bracket: BracketRequest) -> list[OrderResult]:
+        # The entry is the order that spends money; guard it. The exits are part of
+        # the same submission and only activate after the entry fills.
+        entry = bracket.entry
+        notional: Decimal | None = None
+        try:
+            notional = await self._run_guards(entry)
+            if self._dry_run:
+                results = [
+                    OrderResult(
+                        status=OrderStatus.PENDING,
+                        symbol=entry.symbol.upper(),
+                        side=entry.side,
+                        dry_run=True,
+                        message=f"dry-run: bracket validated, NOT sent (notional ~US${notional}).",
+                    )
+                ]
+            else:
+                results = await self._inner.place_bracket(bracket)
+
+            self._record(entry, notional, result=results[0] if results else None)
+            return results
+        except Exception as exc:  # noqa: BLE001 - record the failed attempt, then re-raise
+            self._record(entry, notional, error=exc)
+            raise
+
+    async def _run_guards(self, request: OrderRequest) -> Decimal | None:
+        """Apply every safety lock and return the estimated notional. Raises on violation."""
+        if self._mode is TradingMode.LIVE and not self._allow_live:
+            raise SafetyError(
+                "LIVE mode blocked: set TRADING_ALLOW_LIVE=true to trade with real money."
+            )
+
+        symbol = request.symbol.upper()
+        if symbol in self._symbol_denylist:
+            raise SafetyError(f"Symbol {symbol} is on the deny-list.")
+        if self._symbol_allowlist and symbol not in self._symbol_allowlist:
+            raise SafetyError(f"Symbol {symbol} is not on the allow-list.")
+
+        if self._require_market_open and not self._is_market_open():
+            raise SafetyError(
+                "Market closed: orders are only accepted during regular trading hours (RTH)."
+            )
+
+        notional = await self._notional(request)
+        if notional is not None and notional > self._max_order_value:
+            raise SafetyError(
+                f"Order of ~US${notional} exceeds the MAX_ORDER_VALUE limit "
+                f"(US${self._max_order_value})."
+            )
+
+        if self._journal is not None and self._journal.has_recent_duplicate(
+            request, self._duplicate_window_seconds
+        ):
+            raise SafetyError(
+                f"Duplicate order blocked: an identical {request.side.value} "
+                f"{request.symbol.upper()} was just placed "
+                f"(within {self._duplicate_window_seconds:g}s)."
+            )
+
+        self._check_daily_limit(request, notional)
+        return notional
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         # Read-only estimate (margin/commission/warnings); no guard needed.

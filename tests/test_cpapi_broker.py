@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from ibkr_agent.adapters.cpapi import CpapiBroker, CpapiClient, CpapiError
-from ibkr_agent.domain.models import OrderRequest, OrderSide, OrderType
+from ibkr_agent.domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
 
 BASE = "https://localhost:5000/v1/api"
 ACCT = "DU123"
@@ -131,6 +131,86 @@ async def test_limit_order_body_carries_price():
     assert order["orderType"] == "LMT"
     assert order["price"] == 180.5
     assert order["quantity"] == 2
+    await client.aclose()
+
+
+@respx.mock
+async def test_stop_order_body_carries_stop_in_price():
+    # CPAPI carries a plain STOP's trigger in `price`, not `auxPrice` (validated live).
+    orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "8", "order_status": "Submitted"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    await broker.place_order(
+        OrderRequest(
+            symbol="AAPL", side=OrderSide.SELL, quantity=1,
+            order_type=OrderType.STOP, stop_price=Decimal("170"),
+        )
+    )
+
+    order = _sent_order(orders)
+    assert order["orderType"] == "STP"
+    assert order["price"] == 170
+    assert "auxPrice" not in order
+    await client.aclose()
+
+
+@respx.mock
+async def test_stop_limit_order_body_carries_both_prices():
+    orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "8", "order_status": "Submitted"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    await broker.place_order(
+        OrderRequest(
+            symbol="AAPL", side=OrderSide.SELL, quantity=1, order_type=OrderType.STOP_LIMIT,
+            stop_price=Decimal("170"), limit_price=Decimal("169"),
+        )
+    )
+
+    order = _sent_order(orders)
+    assert order["orderType"] == "STOP_LIMIT"
+    assert order["price"] == 169  # limit
+    assert order["auxPrice"] == 170  # stop trigger
+    await client.aclose()
+
+
+@respx.mock
+async def test_bracket_submits_three_linked_orders():
+    sent = {}
+
+    def capture(request):
+        sent["body"] = json.loads(request.content)
+        return httpx.Response(200, json=[
+            {"order_id": "100", "local_order_id": "parent", "order_status": "Submitted"},
+            {"order_id": "101", "local_order_id": "tp", "order_status": "Submitted"},
+            {"order_id": "102", "local_order_id": "sl", "order_status": "Submitted"},
+        ])
+
+    respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(side_effect=capture)
+    client = CpapiClient(BASE)
+    coids = iter(["parent", "tp", "sl"])
+    broker = CpapiBroker(client, ACCT, _resolver, id_factory=lambda: next(coids))
+
+    results = await broker.place_bracket(
+        BracketRequest(
+            entry=OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=2),
+            take_profit_price=Decimal("200"), stop_loss_price=Decimal("150"),
+        )
+    )
+
+    legs = sent["body"]["orders"]
+    assert [o["orderType"] for o in legs] == ["MKT", "LMT", "STP"]
+    assert legs[1]["side"] == "SELL" and legs[2]["side"] == "SELL"
+    assert legs[1]["parentId"] == "parent" and legs[2]["parentId"] == "parent"
+    assert legs[1]["price"] == 200  # take-profit limit
+    assert legs[2]["price"] == 150  # stop-loss trigger (STP carries it in price)
+    assert {r.message for r in results} == {"entry", "take_profit", "stop_loss"}
+    assert results[0].order_id == "100"
     await client.aclose()
 
 
