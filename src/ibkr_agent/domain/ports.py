@@ -46,6 +46,10 @@ class MarketDataPort(Protocol):
     async def get_positions(self) -> list[Position]:
         ...
 
+    async def invalidate_positions(self) -> None:
+        """Best-effort hint to refresh the eventually-consistent positions cache."""
+        ...
+
 
 @runtime_checkable
 class BrokerPort(Protocol):
@@ -56,6 +60,10 @@ class BrokerPort(Protocol):
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         """Estimate margin/commission/warnings for an order without sending it."""
+        ...
+
+    async def get_order_status(self, order_id: str) -> OrderResult:
+        """Current status of a previously placed order (fill, avg price, state)."""
         ...
 
     async def cancel_order(self, order_id: str) -> OrderResult:

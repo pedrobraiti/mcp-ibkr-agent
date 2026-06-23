@@ -89,6 +89,10 @@ class CpapiBroker:
         )
         return _parse_preview(response, request)
 
+    async def get_order_status(self, order_id: str) -> OrderResult:
+        data = await self._client.get(f"/iserver/account/order/status/{order_id}")
+        return _order_status_to_result(data, order_id)
+
     async def cancel_order(self, order_id: str) -> OrderResult:
         # Best-effort: resolve the symbol/side from live orders before cancelling.
         symbol, side = "", OrderSide.SELL
@@ -263,16 +267,34 @@ def _clean_warning(text: str) -> str:
 
 
 def _live_order_to_result(order: dict) -> OrderResult:
-    side_raw = str(order.get("side", "")).upper()
     return OrderResult(
         order_id=str(order.get("orderId", "")),
         status=_map_status(order.get("status")),
         symbol=str(order.get("ticker", "")),
-        side=OrderSide.BUY if side_raw == "BUY" else OrderSide.SELL,
+        side=_to_side(order.get("side")),
         filled_quantity=_dec(order.get("filledQuantity")),
         message=order.get("orderDesc"),
         raw=order,
     )
+
+
+def _order_status_to_result(response: object, order_id: str) -> OrderResult:
+    """Parse ``/iserver/account/order/status/{id}`` defensively; ``raw`` carries it all."""
+    data = response if isinstance(response, dict) else {}
+    return OrderResult(
+        order_id=str(data.get("order_id") or order_id),
+        status=_map_status(data.get("order_status") or data.get("status")),
+        symbol=str(data.get("ticker") or data.get("symbol") or ""),
+        side=_to_side(data.get("side")),
+        filled_quantity=_dec(data.get("cum_fill") or data.get("filled_quantity")),
+        avg_price=_dec(data.get("average_price") or data.get("avg_price")),
+        message=data.get("order_status") or data.get("status"),
+        raw=data or None,
+    )
+
+
+def _to_side(value: object) -> OrderSide:
+    return OrderSide.BUY if str(value or "").upper() in ("BUY", "B") else OrderSide.SELL
 
 
 def _as_question(response: object) -> dict | None:

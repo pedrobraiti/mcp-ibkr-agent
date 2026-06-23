@@ -3,6 +3,23 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`order_status(order_id)`** tool — confirm an order's state, filled quantity and
+  average price after `buy`/`sell` (positions lag right after a trade).
+- **LIMIT orders** — `buy`/`sell`/`preview_order` accept an optional `limit_price`
+  (market by default; LIMIT requires `quantity`, since `cashQty` is market-only).
+- **In-server keep-alive** — the MCP server now runs a background `/tickle` on its
+  lifespan, so interactive use no longer needs the standalone `ibkr-keepalive`.
+- GitHub issue/PR templates.
+
+### Fixed
+- **`whatif`/`preview_order` parsing** validated against a live response: money fields
+  arrive as unit-suffixed strings (`"2.02 USD"`), warnings come from `warns`, and a
+  fractional cash order reports available-funds impact (now exposed as
+  `available_funds_before`/`after`) instead of the null margin blocks.
+
 ## [0.1.0] - 2026-06-22
 
 First working release, validated live against a real IBKR account.

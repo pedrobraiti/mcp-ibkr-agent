@@ -178,3 +178,32 @@ against a live retail response: IBKR returns money as unit-suffixed strings
 order — leaves the margin blocks null while reporting the available-funds impact in
 `data` rows. The parser handles those shapes and the full `raw` payload is always
 returned alongside the structured fields.
+
+---
+
+## ADR-010 — Close the agent's loop: order status, limit orders, in-server keep-alive
+
+**Context.** Three rough edges made an agentic flow harder than it should be: after a
+buy the agent had no way to confirm a *fill* (positions are eventually-consistent);
+only market orders were possible (no price target or stop); and a long-lived MCP
+process could silently lose its brokerage session because the keep-alive was a separate
+manual command.
+
+**Decision.**
+
+- **`order_status(order_id)`** reads `/iserver/account/order/status/{id}` and returns
+  the state, filled quantity and average price — so the agent confirms a fill directly
+  instead of polling positions. Parsed defensively (full `raw` kept), like `whatif`.
+- **LIMIT orders.** `buy`/`sell`/`preview_order` accept an optional `limit_price`
+  (market by default). LIMIT requires `quantity` — `cashQty` is market-only, so a
+  `limit_price` + `cash_amount` combination is rejected up front. A limit order may
+  surface a confirmation IBKR hasn't been allow-listed for yet; consistent with the
+  safety design, an unmapped warning **blocks** the order rather than auto-confirming.
+- **In-server keep-alive.** The MCP server runs a background `/tickle` on its lifespan,
+  so interactive use needs no separate process. The standalone `ibkr-keepalive` stays
+  for headless/scheduled use. Neither can log in for a retail account — they only
+  tickle and alert.
+
+**Why.** These are the difference between "the plumbing exists" and "an agent trades
+without friction": confirm the fill, set a price, and don't drop the session mid-session
+— without weakening any of the ADR-009 guards (they all still sit on the order path).

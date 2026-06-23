@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from ibkr_agent.adapters.cpapi import CpapiBroker, CpapiClient, CpapiError
-from ibkr_agent.domain.models import OrderRequest, OrderSide
+from ibkr_agent.domain.models import OrderRequest, OrderSide, OrderType
 
 BASE = "https://localhost:5000/v1/api"
 ACCT = "DU123"
@@ -109,6 +109,53 @@ async def test_cancel_order_fills_symbol_from_live_orders():
     assert result.symbol == "AAPL"
     assert result.side.value == "BUY"
     assert result.status.value == "cancelled"
+    await client.aclose()
+
+
+@respx.mock
+async def test_limit_order_body_carries_price():
+    orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "7", "order_status": "Submitted"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    await broker.place_order(
+        OrderRequest(
+            symbol="AAPL", side=OrderSide.BUY, quantity=2,
+            order_type=OrderType.LIMIT, limit_price=Decimal("180.5"),
+        )
+    )
+
+    order = _sent_order(orders)
+    assert order["orderType"] == "LMT"
+    assert order["price"] == 180.5
+    assert order["quantity"] == 2
+    await client.aclose()
+
+
+@respx.mock
+async def test_get_order_status_parses_fill():
+    respx.get(f"{BASE}/iserver/account/order/status/123").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "order_id": 123, "order_status": "Filled", "ticker": "AAPL",
+                "side": "B", "cum_fill": "0.0066", "average_price": "298.96",
+            },
+        )
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    result = await broker.get_order_status("123")
+
+    assert result.order_id == "123"
+    assert result.status.value == "filled"
+    assert result.symbol == "AAPL"
+    assert result.side is OrderSide.BUY
+    assert result.filled_quantity == Decimal("0.0066")
+    assert result.avg_price == Decimal("298.96")
     await client.aclose()
 
 

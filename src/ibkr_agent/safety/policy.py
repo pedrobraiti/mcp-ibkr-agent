@@ -126,6 +126,9 @@ class GuardedBroker:
         # Read-only estimate (margin/commission/warnings); no guard needed.
         return await self._inner.preview_order(request)
 
+    async def get_order_status(self, order_id: str) -> OrderResult:
+        return await self._inner.get_order_status(order_id)
+
     async def cancel_order(self, order_id: str) -> OrderResult:
         return await self._inner.cancel_order(order_id)
 

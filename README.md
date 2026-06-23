@@ -125,13 +125,15 @@ Keep the gateway running while you use Valet; the session needs a fresh login ab
 
 ### Keeping the session alive
 
-The gateway session expires (without `/tickle` in ~6 min; lasts at most ~24h; daily maintenance ~01:00 drops it) — and IBKR offers **no** OAuth for retail, so reauth is always a manual browser login. Run the keep-alive alongside manual use or scheduled jobs:
+The gateway session expires (without `/tickle` in ~6 min; lasts at most ~24h; daily maintenance ~01:00 drops it) — and IBKR offers **no** OAuth for retail, so reauth is always a manual browser login.
+
+**While the MCP server is running it keeps its own session warm** — a background `/tickle` runs on the server's lifespan, so you don't need a separate process for interactive use. For when the MCP server isn't running (e.g. scheduled jobs, or just to watch the session), there's also a standalone keep-alive:
 
 ```bash
 python -m ibkr_agent.keepalive   # or: ibkr-keepalive
 ```
 
-It `/tickle`s every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emits an **alert** (`[ALERT] Reauthentication required: ...`) telling you to log back in. When it is merely *connected* without a brokerage session, it tries to recover on its own (no new 2FA).
+Both `/tickle` every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emit an **alert** (`[ALERT] Reauthentication required: ...`) telling you to log back in. When merely *connected* without a brokerage session, they try to recover on their own (no new 2FA).
 
 ### Login troubleshooting
 
@@ -144,12 +146,13 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 
 ## Exposed tools
 
-`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `cancel_order`, `open_orders`, `trade_history`.
+`session_status`, `market_status`, `get_quote`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `order_status`, `cancel_order`, `open_orders`, `trade_history`.
 
 - `preview_order(symbol, side, ...)` estimates an order's **margin impact, commission and warnings** via IBKR's `whatif` — **without sending it** — so the agent can reason about cost before committing.
-- `buy` takes `cash_amount` (USD, fractional via `cashQty`) **or** `quantity` (shares, fractional ok).
-- `sell` takes only `quantity` (shares, fractional ok). IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
+- `buy` takes `cash_amount` (USD, fractional via `cashQty`) **or** `quantity` (shares, fractional ok). Pass `limit_price` for a **LIMIT** order (market by default; LIMIT needs `quantity`).
+- `sell` takes only `quantity` (shares, fractional ok); optional `limit_price` for a LIMIT sell. IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
 - `close_position(symbol)` closes 100% of a position by trading the exact fractional quantity.
+- `order_status(order_id)` reports an order's state, **filled quantity** and average price — use it after `buy`/`sell` to confirm a fill (positions lag right after a trade).
 - `portfolio()` returns a single snapshot: account summary + open positions + total unrealized P&L.
 - `trade_history(limit)` returns the audit log of recent order attempts (buys, sells, dry-runs, blocks) — answers "what did my agent do?".
 

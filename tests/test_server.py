@@ -6,6 +6,7 @@ from ibkr_agent.domain.models import (
     OrderPreview,
     OrderRequest,
     OrderResult,
+    OrderSide,
     OrderStatus,
     Position,
     Quote,
@@ -32,6 +33,7 @@ async def test_tools_are_registered():
         "sell",
         "close_position",
         "preview_order",
+        "order_status",
         "cancel_order",
         "open_orders",
         "trade_history",
@@ -68,12 +70,21 @@ class _FakeMarketData:
 
 
 class _FakeInner:
+    def __init__(self):
+        self.placed: list[OrderRequest] = []
+
     async def place_order(self, request: OrderRequest) -> OrderResult:
+        self.placed.append(request)
         return OrderResult(order_id="x", status=OrderStatus.SUBMITTED,
                            symbol=request.symbol, side=request.side)
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         return OrderPreview(symbol=request.symbol, side=request.side)
+
+    async def get_order_status(self, order_id: str) -> OrderResult:
+        return OrderResult(order_id=order_id, status=OrderStatus.FILLED,
+                           symbol="AAPL", side=OrderSide.BUY,
+                           filled_quantity=Decimal("0.5"), avg_price=Decimal("10"))
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         raise NotImplementedError
@@ -107,3 +118,45 @@ async def test_smoke_buy_dry_run_and_portfolio_through_tools(tmp_path, monkeypat
     history = await app.trade_history()
     assert history["ok"] is True
     assert len(history["data"]) == 1  # the dry-run buy was journaled
+
+
+async def test_order_status_tool(monkeypatch):
+    svc = Services(
+        settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+        market_data=_FakeMarketData(),
+        broker=GuardedBroker(
+            _FakeInner(), _FakeMarketData(), mode=TradingMode.PAPER, allow_live=False,
+            dry_run=True, max_order_value=Decimal("1000"), require_market_open=False,
+        ),
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    monkeypatch.setattr(app, "_services", svc)
+
+    status = await app.order_status("x")
+    assert status["ok"] is True
+    assert status["data"]["status"] == "filled"
+    assert status["data"]["filled_quantity"] == "0.5"
+
+
+async def test_limit_buy_builds_limit_order(tmp_path, monkeypatch):
+    inner = _FakeInner()
+    market_data = _FakeMarketData()
+    broker = GuardedBroker(
+        inner, market_data, mode=TradingMode.PAPER, allow_live=False,
+        dry_run=False, max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal(tmp_path / "trades.jsonl"),
+    )
+    svc = Services(
+        settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+        market_data=market_data, broker=broker, journal=broker._journal,
+    )
+    monkeypatch.setattr(app, "_services", svc)
+
+    ok = await app.buy("AAPL", quantity=1, limit_price=9.5)
+    assert ok["ok"] is True
+    assert inner.placed[-1].order_type.value == "LMT"
+    assert inner.placed[-1].limit_price == Decimal("9.5")
+
+    rejected = await app.buy("AAPL", cash_amount=10, limit_price=9.5)
+    assert rejected["ok"] is False
+    assert "quantity" in rejected["error"]

@@ -26,6 +26,10 @@ class FakeBroker:
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         return OrderPreview(symbol=request.symbol, side=request.side)
 
+    async def get_order_status(self, order_id: str) -> OrderResult:
+        return OrderResult(order_id=order_id, status=OrderStatus.FILLED,
+                           symbol="", side=OrderSide.BUY)
+
     async def cancel_order(self, order_id: str) -> OrderResult:
         return OrderResult(order_id=order_id, status=OrderStatus.CANCELLED,
                            symbol="", side=OrderSide.SELL)

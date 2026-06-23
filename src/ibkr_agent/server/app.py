@@ -7,15 +7,18 @@ for the agent to read instead of breaking.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..domain.models import OrderRequest, OrderSide
+from ..domain.models import OrderRequest, OrderSide, OrderType
+from ..keepalive import _alert
+from ..session import SessionKeeper
 from .services import Services, build_services
-
-mcp = FastMCP("mcp-ibkr-agent")
 
 _services: Services | None = None
 
@@ -25,6 +28,33 @@ def services() -> Services:
     if _services is None:
         _services = build_services()
     return _services
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    """Run a background keep-alive so the brokerage session stays warm.
+
+    Without this, a long-lived MCP process would silently lose its session
+    (no ``/tickle``) and the next tool call would fail with an auth error. The
+    keeper only tickles and alerts — it cannot log in for a retail account.
+    """
+    svc = services()
+    keeper = SessionKeeper(
+        svc.auth,
+        interval_seconds=svc.settings.tickle_interval_seconds,
+        on_alert=_alert,
+    )
+    task = asyncio.create_task(keeper.run())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await svc.client.aclose()
+
+
+mcp = FastMCP("mcp-ibkr-agent", lifespan=_lifespan)
 
 
 def _ok(data: Any) -> dict:
@@ -108,22 +138,29 @@ async def portfolio() -> dict:
 
 @mcp.tool()
 async def buy(
-    symbol: str, cash_amount: float | None = None, quantity: float | None = None
+    symbol: str,
+    cash_amount: float | None = None,
+    quantity: float | None = None,
+    limit_price: float | None = None,
 ) -> dict:
-    """Market buy. Provide `cash_amount` (US$, fractional via cashQty) OR
-    `quantity` (shares, fractional ok)."""
-    return await _place(OrderSide.BUY, symbol, cash_amount, quantity)
+    """Buy. Provide `cash_amount` (US$, fractional via cashQty) OR `quantity` (shares).
+
+    Omit `limit_price` for a market order. Pass `limit_price` for a LIMIT order —
+    LIMIT requires `quantity` (cashQty is market-only). A limit order may surface a
+    confirmation IBKR hasn't mapped yet; if so it is blocked (safe) until allow-listed.
+    """
+    return await _place(OrderSide.BUY, symbol, cash_amount, quantity, limit_price)
 
 
 @mcp.tool()
-async def sell(symbol: str, quantity: float) -> dict:
-    """Market sell by `quantity` (shares, fractional ok).
+async def sell(symbol: str, quantity: float, limit_price: float | None = None) -> dict:
+    """Sell by `quantity` (shares, fractional ok). Omit `limit_price` for market, pass it for LIMIT.
 
     IBKR does NOT accept selling by US$ value (cashQty is buy-only). To exit
     100% of a position use `close_position`; to sell a dollar amount,
     compute the quantity via `get_quote`.
     """
-    return await _place(OrderSide.SELL, symbol, None, quantity)
+    return await _place(OrderSide.SELL, symbol, None, quantity, limit_price)
 
 
 @mcp.tool()
@@ -163,24 +200,47 @@ async def close_position(symbol: str) -> dict:
 
 @mcp.tool()
 async def preview_order(
-    symbol: str, side: str = "BUY", cash_amount: float | None = None, quantity: float | None = None
+    symbol: str,
+    side: str = "BUY",
+    cash_amount: float | None = None,
+    quantity: float | None = None,
+    limit_price: float | None = None,
 ) -> dict:
     """Preview an order's impact (margin, estimated commission, warnings) WITHOUT sending it.
 
     Uses IBKR's whatif so the agent can reason about cost/margin before committing. `side`
-    is "BUY" or "SELL"; size is `cash_amount` (USD) or `quantity` (shares).
+    is "BUY" or "SELL"; size is `cash_amount` (USD) or `quantity` (shares). Pass
+    `limit_price` to preview a LIMIT order (needs `quantity`).
     """
     svc = services()
     try:
         request = OrderRequest(
             symbol=symbol,
             side=OrderSide(side.upper()),
+            order_type=OrderType.LIMIT if limit_price is not None else OrderType.MARKET,
             cash_qty=Decimal(str(cash_amount)) if cash_amount is not None else None,
             quantity=Decimal(str(quantity)) if quantity is not None else None,
+            limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
         )
         await svc.auth.ensure_session()
         preview = await svc.broker.preview_order(request)
         return _ok(preview.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+async def order_status(order_id: str) -> dict:
+    """Status of a placed order by its order_id: state, filled quantity, average price.
+
+    Use this after `buy`/`sell` to confirm whether the order actually filled —
+    `positions` is eventually-consistent and lags right after a trade.
+    """
+    svc = services()
+    try:
+        await svc.auth.ensure_session()
+        result = await svc.broker.get_order_status(order_id)
+        return _ok(result.model_dump(mode="json"))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -222,15 +282,25 @@ async def trade_history(limit: int = 50) -> dict:
 
 
 async def _place(
-    side: OrderSide, symbol: str, cash_amount: float | None, quantity: float | None
+    side: OrderSide,
+    symbol: str,
+    cash_amount: float | None,
+    quantity: float | None,
+    limit_price: float | None = None,
 ) -> dict:
     svc = services()
     try:
+        if limit_price is not None and cash_amount is not None:
+            raise ValueError(
+                "LIMIT orders use 'quantity', not 'cash_amount' (cashQty is market-only)."
+            )
         request = OrderRequest(
             symbol=symbol,
             side=side,
+            order_type=OrderType.LIMIT if limit_price is not None else OrderType.MARKET,
             cash_qty=Decimal(str(cash_amount)) if cash_amount is not None else None,
             quantity=Decimal(str(quantity)) if quantity is not None else None,
+            limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
         )
         await svc.auth.ensure_session()
         result = await svc.broker.place_order(request)
