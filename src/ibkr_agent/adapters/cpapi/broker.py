@@ -31,16 +31,23 @@ from .client import CpapiClient, CpapiError
 #   o354   "order without market data" (no data subscription)
 #   o163   limit price exceeds the percentage constraint vs. the market — expected
 #          for a deliberate LIMIT order placed away from the current price
+#   o10152 Stop Variant Order Confirmation (STOP / STOP_LIMIT / TRAIL — expected, we
+#          place these on purpose)
 #   o10164 Market Order Confirmation (market-order risk — we use MKT on purpose)
 #   o10223 Confirm Mandatory Cap Price (IB may apply a protective cap/floor)
 #   o10151 disclaimer: trader's responsibility over cash quantity details
 #   o10153 Cash Quantity Order Confirmation (cashQty is simulated: cancels once the amount is spent)
 DEFAULT_ACCEPTED_MESSAGE_IDS = frozenset(
-    {"o354", "o163", "o10164", "o10223", "o10151", "o10153"}
+    {"o354", "o163", "o10152", "o10164", "o10223", "o10151", "o10153"}
 )
 
 # A bracket submits 3 orders, each able to raise its own precaution — allow more rounds.
 _MAX_REPLY_ROUNDS = 12
+
+# The gateway can answer an order POST with a transient 503 *after the order already
+# landed*. Retrying blindly would double-submit, so we first look the order up by its
+# client id (cOID) and only retry when it genuinely didn't land.
+_ORDER_POST_RETRIES = 2
 
 _STATUS_MAP = {
     "submitted": OrderStatus.SUBMITTED,
@@ -75,10 +82,8 @@ class CpapiBroker:
         if conid is None:
             raise CpapiError(f"Could not resolve the conid for {request.symbol}.")
 
-        payload = {"orders": [self._build_order(request, conid)]}
-        response = await self._client.post(
-            f"/iserver/account/{self._account_id}/orders", json=payload
-        )
+        order = self._build_order(request, conid)
+        response = await self._post_orders({"orders": [order]}, [order["cOID"]])
         response = await self._resolve_replies(response)
         return self._parse_ack(response, request)
 
@@ -117,12 +122,47 @@ class CpapiBroker:
             ("take_profit", take_profit, exit_side),
             ("stop_loss", stop_loss, exit_side),
         ]
-        payload = {"orders": [parent, take_profit, stop_loss]}
-        response = await self._client.post(
-            f"/iserver/account/{self._account_id}/orders", json=payload
-        )
+        coids = [leg[1]["cOID"] for leg in legs]
+        response = await self._post_orders({"orders": [parent, take_profit, stop_loss]}, coids)
         response = await self._resolve_replies(response)
         return _parse_bracket_acks(response, entry.symbol, legs)
+
+    async def _post_orders(self, payload: dict, coids: list[str]) -> object:
+        """POST orders, surviving a transient 503 without double-submitting.
+
+        On 503 the order may already have landed, so before retrying we look it up by
+        cOID (the live order's ``order_ref``); if it's there we return that instead of
+        sending again. Only a genuine miss is retried.
+        """
+        url = f"/iserver/account/{self._account_id}/orders"
+        for attempt in range(_ORDER_POST_RETRIES + 1):
+            try:
+                return await self._client.post(url, json=payload)
+            except CpapiError as exc:
+                if exc.status != 503 or attempt == _ORDER_POST_RETRIES:
+                    raise
+                landed = await self._orders_by_coids(coids)
+                if landed:
+                    return landed
+        raise CpapiError("Order POST failed after retries.")  # pragma: no cover
+
+    async def _orders_by_coids(self, coids: list[str]) -> list[dict]:
+        """Live orders whose ``order_ref`` (the cOID we sent) is in ``coids``, as acks."""
+        wanted = set(coids)
+        try:
+            data = await self._client.get("/iserver/account/orders")
+            data = await self._client.get("/iserver/account/orders")
+        except CpapiError:
+            return []
+        orders = data.get("orders", []) if isinstance(data, dict) else []
+        acks = []
+        for order in orders:
+            if isinstance(order, dict) and order.get("order_ref") in wanted:
+                acks.append(
+                    {"order_id": order.get("orderId"), "order_status": order.get("status"),
+                     "local_order_id": order.get("order_ref")}
+                )
+        return acks
 
     def _child_order(
         self, conid: int, side: OrderSide, quantity: float, parent_coid: str,
@@ -190,6 +230,7 @@ class CpapiBroker:
         #   LMT        → price = limit
         #   STP        → price = stop trigger (NOT auxPrice)
         #   STOP_LIMIT → price = limit, auxPrice = stop trigger
+        #   TRAIL      → trailingAmt + trailingType ("amt" $ / "%")
         if request.order_type is OrderType.LIMIT and request.limit_price:
             order["price"] = float(request.limit_price)
         elif request.order_type is OrderType.STOP and request.stop_price:
@@ -197,6 +238,9 @@ class CpapiBroker:
         elif request.order_type is OrderType.STOP_LIMIT:
             order["price"] = float(request.limit_price)
             order["auxPrice"] = float(request.stop_price)
+        elif request.order_type is OrderType.TRAIL and request.trailing_amount:
+            order["trailingAmt"] = float(request.trailing_amount)
+            order["trailingType"] = request.trailing_type.value
         return order
 
     async def _resolve_replies(self, response: object) -> object:

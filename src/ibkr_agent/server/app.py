@@ -15,7 +15,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
+from ..domain.models import (
+    BracketRequest,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    TrailingType,
+)
 from ..keepalive import _alert
 from ..session import SessionKeeper
 from .services import Services, build_services
@@ -234,6 +240,41 @@ async def stop_order(
             quantity=Decimal(str(quantity)),
             stop_price=Decimal(str(stop_price)),
             limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
+        )
+        await svc.auth.ensure_session()
+        result = await svc.broker.place_order(request)
+        return _ok(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+async def trailing_stop(
+    symbol: str,
+    side: str,
+    quantity: float,
+    trail_amount: float | None = None,
+    trail_percent: float | None = None,
+) -> dict:
+    """Place a TRAILING stop — a stop that follows the price (locks in gains as it moves).
+
+    The trigger trails the market by `trail_amount` (US$) **or** `trail_percent` (%).
+    `side` is "BUY" or "SELL" (a trailing stop-loss on a long position is a SELL).
+    Sized by `quantity` (shares).
+    """
+    svc = services()
+    try:
+        if (trail_amount is None) == (trail_percent is None):
+            raise ValueError("Provide exactly one of 'trail_amount' and 'trail_percent'.")
+        amount = trail_amount if trail_amount is not None else trail_percent
+        trailing_type = TrailingType.AMOUNT if trail_amount is not None else TrailingType.PERCENT
+        request = OrderRequest(
+            symbol=symbol,
+            side=OrderSide(side.upper()),
+            order_type=OrderType.TRAIL,
+            quantity=Decimal(str(quantity)),
+            trailing_amount=Decimal(str(amount)),
+            trailing_type=trailing_type,
         )
         await svc.auth.ensure_session()
         result = await svc.broker.place_order(request)

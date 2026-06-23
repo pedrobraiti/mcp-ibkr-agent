@@ -146,7 +146,7 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 
 ## Exposed tools
 
-`session_status`, `market_status`, `get_quote`, `get_quotes`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `stop_order`, `bracket_order`, `order_status`, `wait_for_fill`, `cancel_order`, `open_orders`, `trade_history`.
+`session_status`, `market_status`, `get_quote`, `get_quotes`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `stop_order`, `trailing_stop`, `bracket_order`, `order_status`, `wait_for_fill`, `cancel_order`, `open_orders`, `trade_history`.
 
 - `get_quotes(symbols)` quotes a whole watchlist in **one** snapshot call (cheaper than one `get_quote` per symbol).
 - `preview_order(symbol, side, ...)` estimates an order's **margin impact, commission and warnings** via IBKR's `whatif` — **without sending it** — so the agent can reason about cost before committing.
@@ -154,6 +154,7 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 - `sell` takes only `quantity` (shares, fractional ok); optional `limit_price` for a LIMIT sell. IBKR does **not** allow selling by dollar amount — `cashQty` is buy-only.
 - `close_position(symbol)` closes 100% of a position by trading the exact fractional quantity.
 - `stop_order(symbol, side, quantity, stop_price, limit_price?)` places a **STOP** (e.g. a stop-loss) — a market order triggered at `stop_price`, or a STOP-LIMIT if `limit_price` is given.
+- `trailing_stop(symbol, side, quantity, trail_amount | trail_percent)` places a **trailing stop** — the trigger follows the price (by a US$ amount or a %), locking in gains as it moves.
 - `bracket_order(symbol, quantity, take_profit, stop_loss, ...)` places an entry with attached **take-profit + stop-loss exits (OCO)** — when one exit fills the other is cancelled.
 - `order_status(order_id)` reports an order's state, **filled quantity** and average price — use it after `buy`/`sell` to confirm a fill (positions lag right after a trade). `wait_for_fill(order_id, timeout_seconds)` polls until it fills (or is cancelled/rejected), so the agent doesn't orchestrate the retry itself.
 - `portfolio()` returns a single snapshot: account summary + open positions + total unrealized P&L.

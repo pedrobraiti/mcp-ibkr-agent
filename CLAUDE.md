@@ -93,18 +93,50 @@ sequence is always: restart the gateway → then log in.
 
 ## Using Valet day to day
 
-- Tools: `session_status`, `market_status`, `get_quote`, `get_quotes`,
-  `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`,
-  `close_position`, `stop_order`, `bracket_order`, `order_status`, `wait_for_fill`,
-  `cancel_order`, `open_orders`, `trade_history`.
-- `buy` takes `cash_amount` (USD, fractional) or `quantity`, plus optional `limit_price`.
-  `sell` takes `quantity` (IBKR doesn't allow selling by dollar amount). `close_position(symbol)`
-  exits 100%. `stop_order`/`bracket_order` add stop-loss and entry+exit (OCO) protection.
-- `preview_order` estimates cost/margin via IBKR's whatif before sending. `order_status`
-  (and `wait_for_fill`) confirm a fill; `trade_history` is the local audit log.
-- The MCP server keeps its own session warm (background `/tickle`). For headless/scheduled
-  use, run `python -m ibkr_agent.keepalive` (`ibkr-keepalive`). It alerts
-  (`[ALERT] Reauthentication required: ...`) when the user must log in again.
+These are **all 19 MCP tools** you have once the `ibkr` server is connected — your full
+capability surface. Every tool returns an `{"ok": bool, "data"/"error": ...}` envelope.
+
+**Session & market**
+- `session_status` — is the gateway authenticated/connected/competing.
+- `market_status` — is the US market open (RTH) right now.
+
+**Quotes & account (read-only)**
+- `get_quote(symbol)` — last/bid/ask for one symbol.
+- `get_quotes(symbols)` — quote a whole watchlist in **one** call (cheaper than N `get_quote`).
+- `account_summary` — available funds, net liquidation, buying power.
+- `positions` — open positions.
+- `portfolio` — account summary + positions + total unrealized P&L in one snapshot.
+
+**Before committing**
+- `preview_order(symbol, side, cash_amount|quantity, limit_price?)` — IBKR `whatif`:
+  estimated commission, cost, available-funds impact and warnings **without sending**.
+
+**Placing orders**
+- `buy(symbol, cash_amount|quantity, limit_price?)` — market by default; `cash_amount`
+  is fractional via cashQty; pass `limit_price` for a LIMIT (needs `quantity`).
+- `sell(symbol, quantity, limit_price?)` — by shares (IBKR forbids selling by dollar amount).
+- `close_position(symbol)` — exits 100% of a position at the exact fractional quantity.
+- `stop_order(symbol, side, quantity, stop_price, limit_price?)` — a STOP (stop-loss),
+  or STOP-LIMIT if `limit_price` is given.
+- `trailing_stop(symbol, side, quantity, trail_amount|trail_percent)` — a stop that
+  follows the price (locks in gains as it moves).
+- `bracket_order(symbol, quantity, take_profit, stop_loss, side?, entry_limit_price?)` —
+  an entry with attached take-profit + stop-loss exits (OCO: one fills, the other cancels).
+
+**After placing**
+- `order_status(order_id)` — state, filled quantity, average price (use it to confirm a
+  fill; `positions` lags right after a trade).
+- `wait_for_fill(order_id, timeout_seconds?)` — poll until it fills (or is cancelled/
+  rejected), so you don't orchestrate the retry yourself (timeout capped at 120s).
+- `open_orders` — active orders. `cancel_order(order_id)` — cancel one.
+- `trade_history(limit?)` — local audit log of every attempt (sent, dry-run, blocked).
+
+**Order types supported:** market, limit, stop, stop-limit, trailing-stop, and brackets —
+plus fractional **buys by dollar amount** (cashQty) and fractional sells by quantity.
+
+**Session upkeep:** the MCP server keeps its own session warm (background `/tickle`). For
+headless/scheduled use there's also `python -m ibkr_agent.keepalive` (`ibkr-keepalive`),
+which alerts (`[ALERT] Reauthentication required: ...`) when the user must log in again.
 
 ## Safety — read before placing any order
 

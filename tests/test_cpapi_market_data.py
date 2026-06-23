@@ -118,6 +118,31 @@ async def test_get_positions_skips_zero_quantity_rows():
 
 
 @respx.mock
+async def test_get_positions_rounds_money_to_cents_keeps_quantity_exact():
+    respx.get(f"{BASE}/portfolio/{ACCT}/positions/0").mock(
+        return_value=httpx.Response(200, json=[
+            {"conid": 1, "contractDesc": "AAPL", "position": 0.0066,
+             "avgCost": 298.96999, "mktPrice": 300.41111, "mktValue": 1.98273,
+             "unrealizedPnl": 0.00990},
+        ])
+    )
+    respx.get(f"{BASE}/portfolio/{ACCT}/positions/1").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+
+    p = (await md.get_positions())[0]
+
+    assert p.quantity == Decimal("0.0066")  # fractional quantity stays exact
+    assert p.avg_cost == Decimal("298.97")
+    assert p.market_price == Decimal("300.41")
+    assert p.market_value == Decimal("1.98")
+    assert p.unrealized_pnl == Decimal("0.01")
+    await client.aclose()
+
+
+@respx.mock
 async def test_account_summary_parses_amount_objects():
     respx.get(f"{BASE}/portfolio/{ACCT}/summary").mock(
         return_value=httpx.Response(

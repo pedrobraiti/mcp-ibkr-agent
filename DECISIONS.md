@@ -243,3 +243,31 @@ now enter *and* define its exit in one call. The CPAPI field quirks here are exa
 kind of thing that only surfaces against the real API, so both paths were validated live
 (a non-triggering stop and a non-filling bracket, then cancelled); the unit tests pin the
 exact order bodies so regressions can't slip the field convention.
+
+---
+
+## ADR-012 — Trailing stops, and a 503 that doesn't double-submit
+
+**Context.** Two gaps showed up in real use. (1) A trailing stop — a stop that follows
+the price to lock in gains — was missing. (2) The gateway sometimes answers an order
+POST with a transient **HTTP 503 even though the order already landed**; retrying blindly
+would place the order twice (real money).
+
+**Decision.**
+
+- **`trailing_stop`** sends a CPAPI `TRAIL` order with `trailingAmt` + `trailingType`
+  (`"amt"` for US$, `"%"` for percent). Validated live; like the other order variants it
+  raises a benign confirmation — `o10152` "Stop Variant Order Confirmation" — now
+  allow-listed, so stop / stop-limit / trailing orders aren't blocked.
+- **Idempotent order POST.** On a 503, before retrying we look the order up by its client
+  id (`cOID`, returned as the live order's `order_ref`); if it's already there we return
+  that instead of sending again. Only a genuine miss is retried. This sits in front of
+  both `place_order` and `place_bracket`.
+- **Position precision.** Money fields (market price, average cost, market value,
+  unrealized P&L) are rounded to cents like the balances; the fractional **quantity**
+  stays exact.
+
+**Why.** The 503 case is the kind of silent foot-gun that only an autonomous trader hits
+(it retries faster than a human), and a duplicate order is the worst outcome — so the
+fix is idempotency, not just a retry count. Trailing stops complete the protective-order
+set. Both were validated against the live API, where the field and warning quirks actually live.

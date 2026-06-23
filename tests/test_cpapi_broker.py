@@ -6,7 +6,13 @@ import pytest
 import respx
 
 from ibkr_agent.adapters.cpapi import CpapiBroker, CpapiClient, CpapiError
-from ibkr_agent.domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
+from ibkr_agent.domain.models import (
+    BracketRequest,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    TrailingType,
+)
 
 BASE = "https://localhost:5000/v1/api"
 ACCT = "DU123"
@@ -211,6 +217,71 @@ async def test_bracket_submits_three_linked_orders():
     assert legs[2]["price"] == 150  # stop-loss trigger (STP carries it in price)
     assert {r.message for r in results} == {"entry", "take_profit", "stop_loss"}
     assert results[0].order_id == "100"
+    await client.aclose()
+
+
+@respx.mock
+async def test_trailing_stop_body_carries_trailing_fields():
+    orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "T", "order_status": "Submitted"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    await broker.place_order(
+        OrderRequest(
+            symbol="AAPL", side=OrderSide.SELL, quantity=2, order_type=OrderType.TRAIL,
+            trailing_amount=Decimal("3"), trailing_type=TrailingType.AMOUNT,
+        )
+    )
+
+    order = _sent_order(orders)
+    assert order["orderType"] == "TRAIL"
+    assert order["trailingAmt"] == 3
+    assert order["trailingType"] == "amt"
+    await client.aclose()
+
+
+@respx.mock
+async def test_order_post_503_retried_when_order_did_not_land():
+    posts = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        side_effect=[
+            httpx.Response(503, json={"error": "busy"}),
+            httpx.Response(200, json=[{"order_id": "9", "order_status": "Submitted"}]),
+        ]
+    )
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(200, json={"orders": []})  # nothing landed
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver, id_factory=lambda: "coid-1")
+
+    result = await broker.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1))
+
+    assert result.order_id == "9"
+    assert posts.call_count == 2  # retried after confirming it hadn't landed
+    await client.aclose()
+
+
+@respx.mock
+async def test_order_post_503_not_resent_when_already_landed():
+    # The 503 came after the order landed — we must NOT resend (would double-submit).
+    posts = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        side_effect=[httpx.Response(503, json={"error": "busy"})]
+    )
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(200, json={"orders": [
+            {"orderId": 55, "order_ref": "coid-1", "status": "Submitted",
+             "ticker": "AAPL", "side": "BUY"},
+        ]})
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver, id_factory=lambda: "coid-1")
+
+    result = await broker.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1))
+
+    assert result.order_id == "55"
+    assert posts.call_count == 1  # found by cOID, not re-sent
     await client.aclose()
 
 

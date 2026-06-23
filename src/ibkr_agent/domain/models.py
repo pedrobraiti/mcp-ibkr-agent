@@ -27,6 +27,12 @@ class OrderType(StrEnum):
     LIMIT = "LMT"
     STOP = "STP"
     STOP_LIMIT = "STOP_LIMIT"
+    TRAIL = "TRAIL"
+
+
+class TrailingType(StrEnum):
+    AMOUNT = "amt"
+    PERCENT = "%"
 
 
 class TradingMode(StrEnum):
@@ -59,6 +65,10 @@ class OrderRequest(BaseModel):
     stop_price: Decimal | None = Field(
         default=None, gt=0, description="Trigger price for STOP / STOP_LIMIT orders."
     )
+    trailing_amount: Decimal | None = Field(
+        default=None, gt=0, description="Trail distance for a TRAIL order ($ or %)."
+    )
+    trailing_type: TrailingType = TrailingType.AMOUNT
 
     @model_validator(mode="after")
     def _validate(self) -> OrderRequest:
@@ -68,6 +78,8 @@ class OrderRequest(BaseModel):
             raise ValueError(f"A {self.order_type.value} order requires 'limit_price'.")
         if self.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and self.stop_price is None:
             raise ValueError(f"A {self.order_type.value} order requires 'stop_price'.")
+        if self.order_type is OrderType.TRAIL and self.trailing_amount is None:
+            raise ValueError("A TRAIL order requires 'trailing_amount'.")
         return self
 
     @property

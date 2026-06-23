@@ -3,6 +3,21 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.3.0] - 2026-06-23
+
+### Added
+- **`trailing_stop`** — a stop that follows the price by a US$ amount or a %. CPAPI
+  fields (`trailingAmt`/`trailingType`) and the `o10152` "Stop Variant" confirmation
+  were validated live; `o10152` is now allow-listed so stop/stop-limit/trailing orders
+  aren't blocked.
+
+### Changed
+- **Order placement survives a transient 503.** The gateway can answer an order POST
+  with a 503 *after the order already landed*; placement now looks the order up by its
+  client id (cOID) before retrying, so it never double-submits.
+- **Position money fields are rounded to cents** (market price, average cost, market
+  value, unrealized P&L); the fractional **quantity** stays exact.
+
 ## [0.2.2] - 2026-06-23
 
 ### Added
@@ -68,6 +83,7 @@ First working release, validated live against a real IBKR account.
 - **Keep-alive** session loop with a reauth alert (`ibkr-keepalive`).
 - **Healthcheck** for connection/account (`ibkr-healthcheck`).
 
+[0.3.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.3.0
 [0.2.2]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pedrobraiti/mcp-ibkr-agent/releases/tag/v0.2.0

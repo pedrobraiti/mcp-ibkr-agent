@@ -35,6 +35,7 @@ async def test_tools_are_registered():
         "sell",
         "close_position",
         "stop_order",
+        "trailing_stop",
         "bracket_order",
         "preview_order",
         "order_status",
@@ -196,6 +197,27 @@ async def test_stop_order_builds_stop(tmp_path, monkeypatch):
     assert ok["ok"] is True
     assert inner.placed[-1].order_type.value == "STP"
     assert inner.placed[-1].stop_price == Decimal("8.0")
+
+
+async def test_trailing_stop_tool(tmp_path, monkeypatch):
+    inner = _FakeInner()
+    md = _FakeMarketData()
+    broker = GuardedBroker(
+        inner, md, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal(tmp_path / "t.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=md, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    out = await app.trailing_stop("AAPL", side="SELL", quantity=1, trail_percent=5)
+    assert out["ok"] is True
+    assert inner.placed[-1].order_type.value == "TRAIL"
+    assert inner.placed[-1].trailing_type.value == "%"
+
+    bad = await app.trailing_stop("AAPL", side="SELL", quantity=1)  # neither amount nor pct
+    assert bad["ok"] is False
 
 
 async def test_bracket_order_through_tool(tmp_path, monkeypatch):

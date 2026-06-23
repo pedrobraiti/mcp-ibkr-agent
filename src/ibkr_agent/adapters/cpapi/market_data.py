@@ -161,15 +161,22 @@ def _pick_us_conid(data: dict, symbol: str) -> int | None:
 
 
 def _to_position(raw: dict) -> Position:
+    # Quantity stays exact (fractional shares); money fields come as noisy floats
+    # from IBKR, so round them to cents like the balances.
     return Position(
         conid=int(raw.get("conid", 0)),
         symbol=str(raw.get("contractDesc") or raw.get("ticker") or raw.get("symbol") or ""),
         quantity=_to_decimal(raw.get("position")) or Decimal(0),
-        avg_cost=_to_decimal(raw.get("avgCost")),
-        market_price=_to_decimal(raw.get("mktPrice")),
-        market_value=_to_decimal(raw.get("mktValue")),
-        unrealized_pnl=_to_decimal(raw.get("unrealizedPnl")),
+        avg_cost=_cents(raw.get("avgCost")),
+        market_price=_cents(raw.get("mktPrice")),
+        market_value=_cents(raw.get("mktValue")),
+        unrealized_pnl=_cents(raw.get("unrealizedPnl")),
     )
+
+
+def _cents(value: object) -> Decimal | None:
+    amount = _to_decimal(value)
+    return amount.quantize(Decimal("0.01")) if amount is not None else None
 
 
 def _amount(data: dict, key: str) -> Decimal | None:
