@@ -19,6 +19,9 @@ logs/
 *.db
 *.log
 
+# Demo source video — only the optimized assets/demo.gif is committed (keep repo light)
+assets/*.mp4
+
 # OS / editor
 .DS_Store
 Thumbs.db

@@ -13,6 +13,10 @@
   <img src="https://img.shields.io/badge/status-live--validated-success" alt="Status: live-validated">
 </p>
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Valet demo: asking the agent to buy $2 of Apple — it previews the cost, places the order, and confirms the fill" width="820">
+</p>
+
 An **MCP server** that gives an AI agent (like Claude Code) the ability to trade on **Interactive Brokers**: quotes, balance, positions and orders, and **buy/sell** — including **fractional shares by dollar amount** (`cashQty`) via the Client Portal API.
 
 The investment *decision* (what/when to buy or sell) stays with you and your skill's prompt. This project delivers only the **reliable trading plumbing** — with safety guards on by default.
