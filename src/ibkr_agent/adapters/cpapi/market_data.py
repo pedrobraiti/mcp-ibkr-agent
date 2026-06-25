@@ -48,12 +48,15 @@ class CpapiMarketData:
 
         params = {"conids": str(conid), "fields": _SNAPSHOT_FIELDS}
         snapshot: dict = {}
-        # Warmup: the 1st call starts the stream and returns no price; retry until data arrives.
+        # Warmup: the 1st call starts the stream and returns no price; retry until a real
+        # last price arrives. Keep the latest row each attempt so bid/ask aren't lost if the
+        # last price never fills (presence of the key isn't enough — it can be empty/"").
         for attempt in range(_SNAPSHOT_MAX_ATTEMPTS):
             data = await self._client.get("/iserver/marketdata/snapshot", params=params)
-            if isinstance(data, list) and data and FIELD_LAST in data[0]:
+            if isinstance(data, list) and data:
                 snapshot = data[0]
-                break
+                if _last_price(snapshot.get(FIELD_LAST)) is not None:
+                    break
             if attempt < _SNAPSHOT_MAX_ATTEMPTS - 1:
                 await asyncio.sleep(self._warmup_delay)
 
@@ -80,14 +83,19 @@ class CpapiMarketData:
             "fields": _SNAPSHOT_FIELDS,
         }
         snapshots: dict[int, dict] = {}
-        # Warmup: the 1st call starts the streams and returns no prices; retry until filled.
+        # Warmup: the 1st call starts the streams and returns no prices; retry until every
+        # requested conid has a real (parseable) last price. Keep the latest row per conid
+        # so bid/ask survive even if a last price never arrives for some symbol.
         for attempt in range(_SNAPSHOT_MAX_ATTEMPTS):
             data = await self._client.get("/iserver/marketdata/snapshot", params=params)
             if isinstance(data, list):
                 for row in data:
-                    if isinstance(row, dict) and FIELD_LAST in row and row.get("conid"):
+                    if isinstance(row, dict) and row.get("conid"):
                         snapshots[int(row["conid"])] = row
-            if len(snapshots) >= len(conid_by_symbol):
+            priced = sum(
+                1 for row in snapshots.values() if _last_price(row.get(FIELD_LAST)) is not None
+            )
+            if priced >= len(conid_by_symbol):
                 break
             if attempt < _SNAPSHOT_MAX_ATTEMPTS - 1:
                 await asyncio.sleep(self._warmup_delay)
@@ -152,9 +160,14 @@ def _pick_us_conid(data: dict, symbol: str) -> int | None:
         for contract in contracts:
             if contract.get("isUS") and contract.get("conid"):
                 return int(contract["conid"])
-    # No US listing → return None (fail closed). We deliberately do NOT fall back to an
-    # arbitrary foreign listing: that would trade the wrong instrument in a foreign
-    # currency (and a wrong-currency price would mis-size the value cap).
+    # No explicit isUS flag: accept a USD-denominated listing (a US contract that simply
+    # omits isUS) — but never an arbitrary FOREIGN one, which would trade the wrong
+    # instrument in a foreign currency and mis-size the value cap.
+    for entry in entries:
+        contracts = entry.get("contracts", []) if isinstance(entry, dict) else []
+        for contract in contracts:
+            if str(contract.get("currency", "")).upper() == "USD" and contract.get("conid"):
+                return int(contract["conid"])
     return None
 
 
@@ -200,6 +213,9 @@ def _to_decimal(value: object) -> Decimal | None:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+    # Reject NaN/Infinity: a non-finite money value would crash a later quantize, or
+    # silently become a NaN balance/price.
+    return result if result.is_finite() else None

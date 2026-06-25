@@ -142,7 +142,7 @@ async def test_buy_blocked_when_quote_missing_for_quantity():
     # (the daily cap relies on the same notional) — fail safe rather than send blind.
     broker = FakeBroker()
     guarded = _guarded(broker, FakeMarketData(None))
-    with pytest.raises(SafetyError, match="No price"):
+    with pytest.raises(SafetyError, match="No usable price"):
         await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1))
     assert broker.placed == []
 
@@ -313,6 +313,69 @@ async def test_exit_not_trapped_when_no_quote():
         OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)
     )
     assert result.order_id == "real-1"
+
+
+async def test_value_cap_not_bypassed_by_zero_price():
+    # A zero/garbage price must not make the notional 0 and slip past the cap.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("0")))
+    with pytest.raises(SafetyError, match="No usable price"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=100))
+    assert broker.placed == []
+
+
+async def test_bracket_take_profit_inverted_vs_market_blocked():
+    from ibkr_agent.domain.models import BracketRequest
+
+    # BUY bracket, take_profit (49) BELOW the market (last=50): the SELL limit would fill
+    # instantly when the entry fills. (tp=49 > sl=10 passes the model; the guard catches it.)
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("50")))
+    bracket = BracketRequest(
+        entry=OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1),
+        take_profit_price=Decimal("49"),
+        stop_loss_price=Decimal("10"),
+    )
+    with pytest.raises(SafetyError, match="fill immediately"):
+        await guarded.place_bracket(bracket)
+    assert broker.placed == []
+
+
+async def test_transient_account_read_failure_does_not_trap_after_verified():
+    # First order verifies the account; a later transient read failure falls back to the
+    # cached identity instead of trapping the order (especially an exit).
+    calls = {"n": 0}
+
+    async def provider():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"account_id": "U1", "is_paper": False, "account_type": "LIVE"}
+        raise RuntimeError("transient /iserver/accounts 503")
+
+    broker = FakeBroker()
+    guarded = _guarded(
+        broker, FakeMarketData(Decimal("10"), held=Decimal("5")),
+        account_info_provider=provider, configured_account_id="U1",
+        mode=TradingMode.LIVE, allow_live=True,
+    )
+    await guarded.place_order(_buy("AAPL", "10"))  # verifies + caches
+    # Provider now raises, but a SELL exit must still go through on the cached identity.
+    result = await guarded.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=1)
+    )
+    assert result.order_id == "real-1"
+
+
+async def test_account_read_failure_with_no_prior_verification_fails_closed():
+    async def provider():
+        raise RuntimeError("503")
+
+    guarded = _guarded(
+        FakeBroker(), FakeMarketData(Decimal("10")),
+        account_info_provider=provider, configured_account_id="U1",
+    )
+    with pytest.raises(SafetyError, match="no prior confirmation"):
+        await guarded.place_order(_buy("AAPL", "10"))
 
 
 async def test_bracket_stop_loss_inverted_vs_market_blocked():

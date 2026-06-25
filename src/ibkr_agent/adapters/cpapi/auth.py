@@ -19,8 +19,8 @@ def _coerce_paper(value: object) -> bool | None:
     """
     if isinstance(value, bool):
         return value
-    if isinstance(value, int):  # 0/1 (bool already handled above)
-        return bool(value)
+    if isinstance(value, int):  # accept only 0/1; any other int is unexpected → unknown
+        return bool(value) if value in (0, 1) else None
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in ("true", "1", "yes"):

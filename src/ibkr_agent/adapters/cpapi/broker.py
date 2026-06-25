@@ -154,7 +154,11 @@ class CpapiBroker:
                     ) from lookup_exc
                 if landed:
                     return landed
-                # Confirmed absent → safe to retry.
+                # Confirmed absent → safe to retry. NOTE (verify against a live gateway):
+                # this "absent" verdict assumes a landed order is already visible in
+                # /iserver/account/orders and that IBKR dedupes a resend by cOID/order_ref.
+                # If a just-filled order can be missing from that snapshot, a resend here
+                # could double-submit — the residual risk flagged in the ADR-013 audit.
         raise CpapiError("Order POST failed after retries.")  # pragma: no cover
 
     async def _orders_by_coids(self, coids: list[str]) -> list[dict]:
@@ -210,7 +214,12 @@ class CpapiBroker:
         response = await self._client.delete(
             f"/iserver/account/{self._account_id}/order/{order_id}"
         )
-        data = response if isinstance(response, dict) else {}
+        # A cancel can come back as a confirmation question (like an order POST) or as a
+        # list-shaped ack — resolve the question and normalize the list so we read the real
+        # status instead of dropping it to "pending".
+        response = await self._resolve_replies(response)
+        ack = response[0] if isinstance(response, list) and response else response
+        data = ack if isinstance(ack, dict) else {}
         message = data.get("msg") if data else (str(response) if response is not None else None)
         # IBKR's DELETE only ACKNOWLEDGES the cancel request — it is not confirmation the
         # order is gone (an already-filled order returns 200 with a "cannot be cancelled"
@@ -287,6 +296,11 @@ class CpapiBroker:
                 f"/iserver/reply/{question['id']}", json={"confirmed": True}
             )
 
+        # Ran out of rounds with a question still pending — decline it so we don't leave an
+        # order half-confirmed, then report the abort.
+        leftover = _as_question(response)
+        if leftover is not None:
+            await self._decline(leftover["id"])
         raise CpapiError("Too many CPAPI confirmation rounds; order aborted.")
 
     async def _decline(self, reply_id: str) -> None:

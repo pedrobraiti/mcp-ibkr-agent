@@ -78,6 +78,9 @@ class GuardedBroker:
         self._account_info_provider = account_info_provider
         self._configured_account_id = configured_account_id
         self._allow_short = allow_short
+        # Last account identity that passed every check — used as a fallback so a transient
+        # failure reading the account doesn't trap an exit (see _verify_account).
+        self._verified_identity: dict | None = None
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
         notional: Decimal | None = None
@@ -195,7 +198,17 @@ class GuardedBroker:
         """
         if self._account_info_provider is None:
             return
-        info = await self._account_info_provider()
+        try:
+            info = await self._account_info_provider()
+        except Exception as exc:  # noqa: BLE001 - tolerate a transient blip iff already verified
+            # An exit must never be trapped by a momentary failure reading the account. If
+            # we have a previously CONFIRMED identity, reuse it; otherwise fail closed.
+            if self._verified_identity is None:
+                raise SafetyError(
+                    "Could not read the account from IBKR to confirm paper-vs-live, and there "
+                    "is no prior confirmation. Refusing to trade until it can be confirmed."
+                ) from exc
+            info = self._verified_identity
         account_id = info.get("account_id")
         is_paper = info.get("is_paper")
 
@@ -240,6 +253,10 @@ class GuardedBroker:
                 "Config disagrees with reality: IBKR_TRADING_MODE=live but the gateway is "
                 "logged into a PAPER account. Set IBKR_TRADING_MODE=paper to match, then retry."
             )
+
+        # Identity confirmed — remember it so a later transient read failure can fall back
+        # to it instead of trapping an exit.
+        self._verified_identity = {"account_id": account_id, "is_paper": is_paper}
 
     async def _check_no_naked_short(self, request: OrderRequest) -> None:
         """Block a SELL that exceeds the held position (which would open a short).
@@ -317,16 +334,32 @@ class GuardedBroker:
         if last is None:
             return
         stop_loss = bracket.stop_loss_price
-        if exit_is_sell and stop_loss >= last:
-            raise SafetyError(
-                f"Bracket stop-loss {stop_loss} is at/above the current price ({last}); the "
-                "SELL stop would trigger immediately when the entry fills — check the levels."
-            )
-        if not exit_is_sell and stop_loss <= last:
-            raise SafetyError(
-                f"Bracket stop-loss {stop_loss} is at/below the current price ({last}); the "
-                "BUY stop would trigger immediately when the entry fills — check the levels."
-            )
+        take_profit = bracket.take_profit_price
+        # Both exits must sit on the FAR side of the market, or they fill instantly when the
+        # entry fills and round-trip the position. For a BUY entry the exits are SELLs:
+        # take-profit ABOVE, stop-loss BELOW. A SELL entry is the mirror image.
+        if exit_is_sell:
+            if stop_loss >= last:
+                raise SafetyError(
+                    f"Bracket stop-loss {stop_loss} is at/above the current price ({last}); the "
+                    "SELL stop would trigger immediately when the entry fills — check the levels."
+                )
+            if take_profit <= last:
+                raise SafetyError(
+                    f"Bracket take-profit {take_profit} is at/below the current price ({last}); "
+                    "the SELL limit would fill immediately when the entry fills — check the levels."
+                )
+        else:
+            if stop_loss <= last:
+                raise SafetyError(
+                    f"Bracket stop-loss {stop_loss} is at/below the current price ({last}); the "
+                    "BUY stop would trigger immediately when the entry fills — check the levels."
+                )
+            if take_profit >= last:
+                raise SafetyError(
+                    f"Bracket take-profit {take_profit} is at/above the current price ({last}); "
+                    "the BUY limit would fill immediately when the entry fills — check the levels."
+                )
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         # Read-only estimate (margin/commission/warnings); no guard needed.
@@ -385,8 +418,11 @@ class GuardedBroker:
 
         quote = await self._market_data.get_quote(request.symbol)
         price = quote.last_price if quote else None
-        if price is None:
+        # A non-positive price (a zero/garbage tick) would make the notional 0 and silently
+        # bypass the value cap — treat it like a missing price and fail closed.
+        if price is None or price <= 0:
             raise SafetyError(
-                f"No price for {request.symbol}: cannot validate the order's value limit."
+                f"No usable price for {request.symbol} (got {price}): cannot validate the "
+                "order's value limit."
             )
         return price * (request.quantity or Decimal(0))

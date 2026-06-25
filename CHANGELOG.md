@@ -47,6 +47,26 @@ versioning follows [SemVer](https://semver.org/).
 - **`TRADING_ALLOW_SHORT`** (default `false`) gates whether a SELL may exceed the held
   position.
 
+### Hardened — second audit pass (run-proven multi-agent review)
+- **Value cap no longer bypassable by a zero/negative price** — a non-positive quote is
+  treated like a missing one (fail closed), so it can't make the notional 0 and slip a
+  large BUY past `MAX_ORDER_VALUE`.
+- **Brackets also check the take-profit vs the live market** (not just the stop-loss), so
+  a take-profit on the wrong side can't fill instantly and round-trip the position.
+- **A transient failure reading the account no longer traps an exit** — once an identity
+  is confirmed, a momentary `/iserver/accounts` blip falls back to it instead of blocking
+  (still fails closed when nothing was ever confirmed).
+- **Daily-spend cap counts dispatched-but-unconfirmed buys** (which may have spent money)
+  and **excludes rejected/cancelled** ones (which didn't).
+- **Duplicate guard keys on `order_type` too and ignores rejected/cancelled attempts** —
+  a resting STOP no longer blocks a panic MARKET exit, and a rejected order doesn't block
+  its corrected retry.
+- Smaller fixes: non-finite (`NaN`/`Inf`) money values dropped instead of crashing;
+  `isPaper` only accepts `0`/`1` as an int (else unknown → fail closed); quote warmup waits
+  for a real price (keeping bid/ask); `cancel_order` parses list-shaped/confirmation
+  responses; the confirmation loop declines a leftover question on abort; conid resolution
+  falls back to a USD listing when `isUS` is absent (never a foreign one).
+
 ### Docs
 - Troubleshoot `ERR_CONNECTION_REFUSED` (the gateway simply isn't running) distinctly
   from the "logged in but nothing happens" case.

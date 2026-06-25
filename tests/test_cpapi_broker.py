@@ -138,6 +138,24 @@ async def test_cancel_order_reports_cancelled_only_when_gateway_confirms():
 
 
 @respx.mock
+async def test_cancel_order_parses_list_shaped_ack():
+    # A list-shaped confirmation must be read, not dropped to "pending".
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(200, json={"orders": []})
+    )
+    respx.delete(f"{BASE}/iserver/account/{ACCT}/order/88").mock(
+        return_value=httpx.Response(200, json=[{"order_id": "88", "order_status": "Cancelled"}])
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    result = await broker.cancel_order("88")
+
+    assert result.status.value == "cancelled"
+    await client.aclose()
+
+
+@respx.mock
 async def test_limit_order_body_carries_price():
     orders = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
         return_value=httpx.Response(200, json=[{"order_id": "7", "order_status": "Submitted"}])

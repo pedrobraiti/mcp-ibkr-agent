@@ -73,6 +73,61 @@ async def test_get_quote_strips_state_prefix_from_last_price():
 
 
 @respx.mock
+async def test_resolve_conid_falls_back_to_usd_when_no_is_us_flag():
+    # A US contract that omits isUS but is USD-denominated must still resolve (and a
+    # foreign one must not).
+    respx.get(f"{BASE}/trsrv/stocks").mock(
+        return_value=httpx.Response(
+            200,
+            json={"AAPL": [{"contracts": [
+                {"conid": 999, "exchange": "LSE", "currency": "GBP"},
+                {"conid": 265598, "exchange": "NASDAQ", "currency": "USD"},
+            ]}]},
+        )
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+    assert await md.resolve_conid("AAPL") == 265598
+    await client.aclose()
+
+
+@respx.mock
+async def test_get_quote_retries_past_a_priceless_row_and_keeps_bid_ask():
+    respx.get(f"{BASE}/trsrv/stocks").mock(
+        return_value=httpx.Response(
+            200, json={"AAPL": [{"contracts": [{"conid": 265598, "isUS": True}]}]}
+        )
+    )
+    respx.get(f"{BASE}/iserver/marketdata/snapshot").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"conid": 265598, "31": ""}]),  # priceless → retry
+            httpx.Response(200, json=[{"conid": 265598, "31": "195.50", "84": "195.40"}]),
+        ]
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+    quote = await md.get_quote("AAPL")
+    assert quote.last_price == Decimal("195.50")
+    assert quote.bid == Decimal("195.40")
+    await client.aclose()
+
+
+@respx.mock
+async def test_account_summary_drops_non_finite_balance():
+    respx.get(f"{BASE}/portfolio/{ACCT}/summary").mock(
+        return_value=httpx.Response(
+            200, json={"availablefunds": {"amount": "Infinity"}, "netliquidation": "8.63"}
+        )
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+    summary = await md.get_account_summary()  # must not raise on a non-finite value
+    assert summary.available_funds is None
+    assert summary.net_liquidation == Decimal("8.63")
+    await client.aclose()
+
+
+@respx.mock
 async def test_get_quote_handles_snapshot_warmup():
     respx.get(f"{BASE}/trsrv/stocks").mock(
         return_value=httpx.Response(

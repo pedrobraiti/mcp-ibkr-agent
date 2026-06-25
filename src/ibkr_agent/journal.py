@@ -88,20 +88,28 @@ class TradeJournal:
         return entries[-limit:] if limit else entries
 
     def spent_today(self) -> Decimal:
-        """Sum of BUY notionals actually placed (got an order_id) today, market-tz."""
+        """Sum of today's BUY notionals that may have spent money (market-tz).
+
+        Counts a buy that was acked (``order_id``) OR merely dispatched (``sent``) — the
+        latter may have filled even without an ack (timeout/503), so for a spend cap we
+        must assume it did. Excludes buys the gateway resolved as rejected/cancelled, which
+        moved no money.
+        """
         today = datetime.now(self._tz).date().isoformat()
         total = Decimal(0)
         for entry in self.read(limit=0):
-            if (
-                entry.get("side") == OrderSide.BUY.value
-                and entry.get("order_id")
-                and entry.get("notional")
-                and str(entry.get("timestamp", "")).startswith(today)
-            ):
-                try:
-                    total += Decimal(entry["notional"])
-                except (InvalidOperation, ValueError):
-                    pass
+            if entry.get("side") != OrderSide.BUY.value or not entry.get("notional"):
+                continue
+            if not str(entry.get("timestamp", "")).startswith(today):
+                continue
+            if not (entry.get("order_id") or entry.get("sent")):
+                continue
+            if entry.get("status") in ("rejected", "cancelled"):
+                continue
+            try:
+                total += Decimal(entry["notional"])
+            except (InvalidOperation, ValueError):
+                pass
         return total
 
     def has_recent_duplicate(self, request: OrderRequest, window_seconds: float) -> bool:
@@ -113,13 +121,20 @@ class TradeJournal:
         for entry in reversed(self.read(limit=200)):
             # An order counts as a possible duplicate if it was dispatched to the broker
             # (`sent`) — even if no order_id came back (timeout/503), because it may have
-            # filled. Pure guard-blocked attempts (never sent) don't count.
+            # filled. Pure guard-blocked attempts (never sent) don't count, and neither do
+            # ones the gateway resolved as rejected/cancelled (nothing happened, so a
+            # corrected retry must be allowed).
             if not (entry.get("sent") or entry.get("order_id")):
                 continue
+            if entry.get("status") in ("rejected", "cancelled"):
+                continue
             entry_size = entry.get("cash_qty") or entry.get("quantity")
+            # Match on order_type too: a resting STOP and a panic MARKET sell of the same
+            # size are DIFFERENT orders — collapsing them would trap a genuine exit.
             if (
                 entry.get("symbol") == request.symbol.upper()
                 and entry.get("side") == request.side.value
+                and entry.get("order_type") == request.order_type.value
                 and entry_size == size
             ):
                 try:

@@ -5,6 +5,7 @@ from ibkr_agent.domain.models import (
     OrderResult,
     OrderSide,
     OrderStatus,
+    OrderType,
     TradingMode,
 )
 from ibkr_agent.journal import TradeJournal
@@ -82,6 +83,45 @@ def test_guard_blocked_attempt_is_not_a_duplicate(tmp_path):
                    notional=Decimal("10"), error=RuntimeError("market closed"), sent=False)
 
     assert journal.has_recent_duplicate(request, 5) is False
+
+
+def test_spent_today_counts_sent_unconfirmed_and_excludes_failed(tmp_path):
+    journal = TradeJournal(tmp_path / "trades.jsonl")
+    buy = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("30"))
+    # Sent but unconfirmed (no order_id) — may have spent money → must count.
+    journal.record(request=buy, mode=TradingMode.LIVE, dry_run=False,
+                   notional=Decimal("30"), error=RuntimeError("503"), sent=True)
+    # Acked then rejected — moved no money → must NOT count.
+    rejected = OrderResult(order_id="9", status=OrderStatus.REJECTED, symbol="AAPL",
+                           side=OrderSide.BUY)
+    journal.record(request=buy, mode=TradingMode.LIVE, dry_run=False,
+                   notional=Decimal("70"), result=rejected, sent=True)
+
+    assert journal.spent_today() == Decimal("30")
+
+
+def test_different_order_type_is_not_a_duplicate(tmp_path):
+    # A resting STOP and a panic MARKET sell of the same size are different orders — the
+    # second must not be trapped as a duplicate.
+    journal = TradeJournal(tmp_path / "trades.jsonl")
+    stop = OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=Decimal("5"),
+                        order_type=OrderType.STOP, stop_price=Decimal("40"))
+    journal.record(request=stop, mode=TradingMode.LIVE, dry_run=False,
+                   notional=None, result=PLACED, sent=True)
+
+    market_sell = OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=Decimal("5"))
+    assert journal.has_recent_duplicate(market_sell, 30) is False
+
+
+def test_rejected_order_does_not_block_retry(tmp_path):
+    journal = TradeJournal(tmp_path / "trades.jsonl")
+    buy = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))
+    rejected = OrderResult(order_id="9", status=OrderStatus.REJECTED, symbol="AAPL",
+                           side=OrderSide.BUY)
+    journal.record(request=buy, mode=TradingMode.LIVE, dry_run=False,
+                   notional=Decimal("10"), result=rejected, sent=True)
+
+    assert journal.has_recent_duplicate(buy, 30) is False
 
 
 def test_has_recent_duplicate(tmp_path):

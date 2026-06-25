@@ -45,6 +45,17 @@ async def test_account_info_coerces_string_is_paper():
 
 
 @respx.mock
+async def test_account_info_unexpected_int_is_paper_stays_none():
+    # An unexpected int (not 0/1) must NOT be coerced to "paper" — it stays unknown so the
+    # guard fails closed rather than guessing real-money-safe.
+    respx.get(f"{BASE}/iserver/accounts").mock(
+        return_value=httpx.Response(200, json={"selectedAccount": "U1", "isPaper": 2})
+    )
+    info = await GatewayAuth(CpapiClient(BASE)).account_info()
+    assert info["is_paper"] is None
+
+
+@respx.mock
 async def test_account_info_unknown_prefix_stays_none_not_paper():
     # A real-money non-"U" account (advisor "F…") with no isPaper must NOT be guessed as
     # paper — it stays unknown (None) so the guard fails closed.
