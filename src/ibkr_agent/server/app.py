@@ -65,11 +65,19 @@ mcp = FastMCP("mcp-ibkr-agent", lifespan=_lifespan)
 
 
 # IBKR's portfolio is eventually-consistent: after a close is sent, the position can still
-# show its old size for tens of seconds. To stop a doc-recommended retry from selling the
-# same position twice (an unintended short), we refuse to re-close the same contract within
-# this cooldown and point the caller to order_status. Keyed by conid → monotonic time sent.
+# show its old size for tens of seconds. To stop a (sequential OR concurrent) retry from
+# selling the same position twice (an unintended short), we reserve the contract before
+# touching the network and refuse a second close within this cooldown, pointing the caller
+# to order_status. Keyed by conid → monotonic time reserved. The reservation is released if
+# nothing was actually dispatched (no position, dry-run, or a rejected/failed order).
 _CLOSE_COOLDOWN_SECONDS = 45.0
 _recent_closes: dict[int, float] = {}
+_NON_DISPATCH_STATUSES = {"rejected", "inactive", "cancelled"}
+
+
+def _evict_stale_closes(now: float) -> None:
+    for conid in [c for c, ts in _recent_closes.items() if now - ts >= _CLOSE_COOLDOWN_SECONDS]:
+        _recent_closes.pop(conid, None)
 
 
 def _ok(data: Any) -> dict:
@@ -231,8 +239,12 @@ async def close_position(symbol: str) -> dict:
                     ),
                 }
             )
+        # Reserve the contract SYNCHRONOUSLY (no await between the check and the claim) so a
+        # second close — sequential or concurrent — sees it and backs off.
+        now = time.monotonic()
+        _evict_stale_closes(now)
         sent_at = _recent_closes.get(conid)
-        if sent_at is not None and (time.monotonic() - sent_at) < _CLOSE_COOLDOWN_SECONDS:
+        if sent_at is not None and (now - sent_at) < _CLOSE_COOLDOWN_SECONDS:
             return _ok(
                 {
                     "closed": False,
@@ -244,25 +256,33 @@ async def close_position(symbol: str) -> dict:
                     ),
                 }
             )
-        await svc.market_data.invalidate_positions()
-        rows = await svc.market_data.get_positions()
-        position = next((p for p in rows if p.conid == conid), None)
-        if position is None or position.quantity == 0:
-            return _ok(
-                {
-                    "closed": False,
-                    "reason": (
-                        f"No open position in {symbol.upper()} (remember: IBKR's "
-                        "portfolio can take tens of seconds to reflect a recent buy)."
-                    ),
-                }
-            )
+        _recent_closes[conid] = now
+        dispatched = False
+        try:
+            await svc.market_data.invalidate_positions()
+            rows = await svc.market_data.get_positions()
+            position = next((p for p in rows if p.conid == conid), None)
+            if position is None or position.quantity == 0:
+                return _ok(
+                    {
+                        "closed": False,
+                        "reason": (
+                            f"No open position in {symbol.upper()} (remember: IBKR's "
+                            "portfolio can take tens of seconds to reflect a recent buy)."
+                        ),
+                    }
+                )
 
-        side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
-        request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
-        result = await svc.broker.place_order(request)
-        _recent_closes[conid] = time.monotonic()
-        return _ok(result.model_dump(mode="json"))
+            side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
+            request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
+            result = await svc.broker.place_order(request)
+            # Keep the cooldown only if a live order actually went out; otherwise release it
+            # so a legitimate retry isn't stranded.
+            dispatched = not result.dry_run and result.status.value not in _NON_DISPATCH_STATUSES
+            return _ok(result.model_dump(mode="json"))
+        finally:
+            if not dispatched:
+                _recent_closes.pop(conid, None)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -426,11 +446,14 @@ _WAIT_MAX_TIMEOUT = 120.0
 
 @mcp.tool()
 async def wait_for_fill(order_id: str, timeout_seconds: float = 30.0) -> dict:
-    """Poll an order until it fills (or is cancelled/rejected), or the timeout elapses.
+    """Poll an order until it reaches a terminal state (filled/cancelled/rejected/inactive),
+    or the timeout elapses.
 
     Closes the confirm-the-fill loop so the agent doesn't have to orchestrate the
     retry itself. Returns the latest status with `timed_out` true if it was still
-    working when time ran out. `timeout_seconds` is capped at 120.
+    working when time ran out. `timeout_seconds` is capped at 120. Note: an `inactive`
+    result usually means the order was rejected/killed, but IBKR also uses it for an
+    order parked until the market opens — so confirm intent before assuming it's dead.
     """
     svc = services()
     try:

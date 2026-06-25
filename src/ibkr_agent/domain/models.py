@@ -14,7 +14,7 @@ from __future__ import annotations
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class OrderSide(StrEnum):
@@ -69,6 +69,13 @@ class OrderRequest(BaseModel):
     stop_price: Decimal | None = Field(
         default=None, gt=0, description="Trigger price for STOP / STOP_LIMIT orders."
     )
+
+    @field_validator("symbol")
+    @classmethod
+    def _strip_symbol(cls, value: str) -> str:
+        # Strip surrounding whitespace so a padded symbol (" AAPL ") can't slip past the
+        # deny/allow-list (which match the symbol) while still resolving to a contract.
+        return value.strip()
     trailing_amount: Decimal | None = Field(
         default=None, gt=0, description="Trail distance for a TRAIL order ($ or %)."
     )

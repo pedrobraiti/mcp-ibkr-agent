@@ -323,6 +323,63 @@ async def test_close_position_cooldown_blocks_immediate_reclose(monkeypatch):
     app._recent_closes.clear()
 
 
+async def test_close_position_concurrent_double_is_prevented(monkeypatch):
+    import asyncio
+
+    app._recent_closes.clear()
+
+    class _SlowMarketData(_FakeMarketData):
+        async def get_positions(self):
+            await asyncio.sleep(0.01)  # let the second call interleave after the reservation
+            return [Position(conid=1, symbol="AAPL", quantity=Decimal("5"))]
+
+    market_data = _SlowMarketData()
+    inner = _FakeInner()
+    broker = GuardedBroker(
+        inner, market_data, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=market_data, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    results = await asyncio.gather(app.close_position("AAPL"), app.close_position("AAPL"))
+    backed_off = [r for r in results if r["data"].get("closed") is False]
+    assert len(backed_off) == 1            # one reserved, the other saw it and backed off
+    assert len(inner.placed) == 1          # only ONE sell dispatched (no double-close)
+    app._recent_closes.clear()
+
+
+async def test_close_position_releases_cooldown_on_rejected(monkeypatch):
+    app._recent_closes.clear()
+
+    class _RejectingInner(_FakeInner):
+        async def place_order(self, request: OrderRequest) -> OrderResult:
+            self.placed.append(request)
+            return OrderResult(order_id=None, status=OrderStatus.REJECTED,
+                               symbol=request.symbol, side=request.side)
+
+    market_data = _FakeMarketData()
+    inner = _RejectingInner()
+    broker = GuardedBroker(
+        inner, market_data, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=market_data, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    first = await app.close_position("AAPL")
+    assert first["data"]["status"] == "rejected"
+    # The reservation was released (nothing dispatched), so a retry is NOT cooldown-blocked.
+    second = await app.close_position("AAPL")
+    assert second["data"].get("closed") is not False
+    assert len(inner.placed) == 2
+    app._recent_closes.clear()
+
+
 async def test_wait_for_fill_stops_on_inactive(monkeypatch):
     class _InactiveInner(_FakeInner):
         async def get_order_status(self, order_id: str) -> OrderResult:

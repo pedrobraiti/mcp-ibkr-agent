@@ -398,6 +398,74 @@ async def test_concurrent_identical_buys_are_serialized(tmp_path):
     assert sum(isinstance(r, SafetyError) for r in results) == 1
 
 
+async def test_covering_a_short_is_not_value_capped():
+    # Buying to cover a short is an EXIT — it must not be value-capped (5*60=300 > cap 100).
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("-5")))
+    result = await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+    assert result.order_id == "real-1"
+
+
+async def test_covering_a_short_is_not_trapped_by_missing_price():
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(None, held=Decimal("-5")))
+    result = await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+    assert result.order_id == "real-1"
+
+
+async def test_opening_buy_is_still_capped_when_not_covering_a_short():
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("0")))
+    with pytest.raises(SafetyError, match="exceeds"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+
+
+async def test_buying_beyond_the_short_stays_capped():
+    # Covering 5 but buying 10 is partly opening → keep it capped.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("-5")))
+    with pytest.raises(SafetyError, match="exceeds"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=10))
+
+
+async def test_marketable_limit_bracket_is_blocked():
+    from ibkr_agent.domain.models import BracketRequest, OrderType
+
+    # BUY LIMIT @100 with market at 90 fills ~90 (marketable), so stop_loss 95 would fire
+    # instantly. The model passes (110>100>95); the guard must catch it via the fill price.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("90"), held=Decimal("0")))
+    bracket = BracketRequest(
+        entry=OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1,
+                           order_type=OrderType.LIMIT, limit_price=Decimal("100")),
+        take_profit_price=Decimal("110"),
+        stop_loss_price=Decimal("95"),
+    )
+    with pytest.raises(SafetyError, match="trigger immediately"):
+        await guarded.place_bracket(bracket)
+    assert broker.placed == []
+
+
+async def test_concurrent_identical_sells_are_serialized(tmp_path):
+    # Exits are serialized too (a per-side lock), so two parallel identical SELLs can't
+    # both slip past the duplicate guard into a double-exit.
+    import asyncio
+
+    from ibkr_agent.journal import TradeJournal
+
+    journal = TradeJournal(tmp_path / "t.jsonl")
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("10"), held=Decimal("5")),
+                       journal=journal, duplicate_window_seconds=30)
+    results = await asyncio.gather(
+        guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)),
+        guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)),
+        return_exceptions=True,
+    )
+    assert len(broker.placed) == 1
+    assert sum(isinstance(r, SafetyError) for r in results) == 1
+
+
 async def test_limit_entry_bracket_not_blocked_by_market_check():
     from ibkr_agent.domain.models import BracketRequest, OrderType
 

@@ -82,14 +82,17 @@ class GuardedBroker:
         # Last account identity that passed every check — used as a fallback so a transient
         # failure reading the account doesn't trap an exit (see _verify_account).
         self._verified_identity: dict | None = None
-        # Serializes the check->dispatch->journal critical section: the journal-backed
-        # guards (daily cap, duplicate) read state that is only written after the order is
-        # sent, so two concurrent calls (e.g. parallel tool calls) could both pass before
-        # either records. The lock makes each order atomic w.r.t. the others.
-        self._order_lock = asyncio.Lock()
+        # Serializes the check->dispatch->journal critical section per SIDE: the journal
+        # guards (daily cap is BUY-only; the duplicate guard matches on side) only ever
+        # conflict same-side, so one lock per side closes the TOCTOU without making an
+        # urgent exit (SELL) wait behind a slow entry (BUY).
+        self._order_locks = {
+            OrderSide.BUY: asyncio.Lock(),
+            OrderSide.SELL: asyncio.Lock(),
+        }
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
-        async with self._order_lock:
+        async with self._order_locks[request.side]:
             return await self._place_order_locked(request)
 
     async def _place_order_locked(self, request: OrderRequest) -> OrderResult:
@@ -116,7 +119,7 @@ class GuardedBroker:
             raise
 
     async def place_bracket(self, bracket: BracketRequest) -> list[OrderResult]:
-        async with self._order_lock:
+        async with self._order_locks[bracket.entry.side]:
             return await self._place_bracket_locked(bracket)
 
     async def _place_bracket_locked(self, bracket: BracketRequest) -> list[OrderResult]:
@@ -173,12 +176,12 @@ class GuardedBroker:
             )
 
         # The value limit caps how much is *spent* — it applies to entries (BUYS).
-        # Exits (sells, closes, stop-losses) reduce exposure, so they are not
-        # value-gated. Crucially, we only compute the notional for a BUY: pricing a
-        # SELL would fetch a quote and could RAISE on a missing price, which would
-        # trap an exit — exactly what must never happen.
+        # Exits reduce exposure, so they are not value-gated and never priced (pricing
+        # could RAISE on a missing quote and trap the exit). A SELL is always an exit;
+        # a BUY is an exit only when it covers a SHORT (close_position emits a BUY to
+        # close a short). So a covering BUY is treated like any other exit.
         notional: Decimal | None = None
-        if request.side is OrderSide.BUY:
+        if request.side is OrderSide.BUY and not await self._is_covering_short(request):
             notional = await self._notional(request)
             if notional is not None and notional > self._max_order_value:
                 raise SafetyError(
@@ -272,6 +275,29 @@ class GuardedBroker:
         # to it instead of trapping an exit.
         self._verified_identity = {"account_id": account_id, "is_paper": is_paper}
 
+    async def _is_covering_short(self, request: OrderRequest) -> bool:
+        """True if this BUY (by quantity) merely covers an existing SHORT — i.e. an exit.
+
+        Covering a short reduces exposure, so it must not be value-capped or priced (which
+        would trap the exit). If holdings can't be confirmed we return False (treat it as an
+        opening buy and keep it capped — the safe default that never weakens new-buy limits).
+        cashQty buys have no quantity and are always opening, so they stay capped.
+        """
+        if request.quantity is None:
+            return False
+        try:
+            conid = await self._market_data.resolve_conid(request.symbol)
+            if conid is None:
+                return False
+            await self._market_data.invalidate_positions()
+            positions = await self._market_data.get_positions()
+        except Exception:  # noqa: BLE001 - can't confirm a short → treat as an opening buy
+            return False
+        held = sum((p.quantity for p in positions if p.conid == conid), Decimal(0))
+        # held < 0 is a short; buying up to its size covers it (a pure exit). Buying MORE
+        # than the short is partly opening, so keep that capped.
+        return held < 0 and request.quantity <= -held
+
     async def _check_no_naked_short(self, request: OrderRequest) -> None:
         """Block a SELL that exceeds the held position (which would open a short).
 
@@ -339,12 +365,6 @@ class GuardedBroker:
         stop-loss must sit below the current price, and vice-versa). Skipped if no price.
         """
         entry = bracket.entry
-        # A LIMIT entry fills at entry.limit_price, not at the current market — and
-        # BracketRequest already validates the exits against that limit. Only a MARKET
-        # entry fills at ~the live price, so only then is the market-relative check valid
-        # (otherwise we'd wrongly block a legit "buy the dip" bracket).
-        if entry.limit_price is not None:
-            return
         exit_is_sell = entry.side is OrderSide.BUY
         try:
             quote = await self._market_data.get_quote(entry.symbol)
@@ -353,31 +373,43 @@ class GuardedBroker:
         last = quote.last_price if quote else None
         if last is None:
             return
+        # Effective fill price. A non-marketable LIMIT entry fills at its limit (a "buy the
+        # dip"); a MARKETABLE limit (BUY limit >= market) or a MARKET entry fills at ~the
+        # live price. Using min(limit, last) for a BUY (max for a SELL) catches the
+        # marketable case while still allowing the legit dip bracket.
+        if entry.limit_price is not None:
+            fill = (
+                min(entry.limit_price, last)
+                if entry.side is OrderSide.BUY
+                else max(entry.limit_price, last)
+            )
+        else:
+            fill = last
         stop_loss = bracket.stop_loss_price
         take_profit = bracket.take_profit_price
-        # Both exits must sit on the FAR side of the market, or they fill instantly when the
-        # entry fills and round-trip the position. For a BUY entry the exits are SELLs:
-        # take-profit ABOVE, stop-loss BELOW. A SELL entry is the mirror image.
+        # Both exits must sit on the FAR side of the effective fill, or they fill instantly
+        # when the entry fills and round-trip the position. For a BUY entry the exits are
+        # SELLs: take-profit ABOVE, stop-loss BELOW. A SELL entry is the mirror image.
         if exit_is_sell:
-            if stop_loss >= last:
+            if stop_loss >= fill:
                 raise SafetyError(
-                    f"Bracket stop-loss {stop_loss} is at/above the current price ({last}); the "
+                    f"Bracket stop-loss {stop_loss} is at/above the entry fill (~{fill}); the "
                     "SELL stop would trigger immediately when the entry fills — check the levels."
                 )
-            if take_profit <= last:
+            if take_profit <= fill:
                 raise SafetyError(
-                    f"Bracket take-profit {take_profit} is at/below the current price ({last}); "
+                    f"Bracket take-profit {take_profit} is at/below the entry fill (~{fill}); "
                     "the SELL limit would fill immediately when the entry fills — check the levels."
                 )
         else:
-            if stop_loss <= last:
+            if stop_loss <= fill:
                 raise SafetyError(
-                    f"Bracket stop-loss {stop_loss} is at/below the current price ({last}); the "
+                    f"Bracket stop-loss {stop_loss} is at/below the entry fill (~{fill}); the "
                     "BUY stop would trigger immediately when the entry fills — check the levels."
                 )
-            if take_profit >= last:
+            if take_profit >= fill:
                 raise SafetyError(
-                    f"Bracket take-profit {take_profit} is at/above the current price ({last}); "
+                    f"Bracket take-profit {take_profit} is at/above the entry fill (~{fill}); "
                     "the BUY limit would fill immediately when the entry fills — check the levels."
                 )
 

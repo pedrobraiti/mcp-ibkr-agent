@@ -47,6 +47,22 @@ versioning follows [SemVer](https://semver.org/).
 - **`TRADING_ALLOW_SHORT`** (default `false`) gates whether a SELL may exceed the held
   position.
 
+### Hardened — fourth audit pass (polishing the prior fixes + one structural blind spot)
+- **Covering a SHORT is treated as an exit.** A BUY that closes a short position (which
+  `close_position` emits) is no longer value-capped or blocked on a missing price — so a
+  short worth more than `MAX_ORDER_VALUE` can still be closed. Opening buys stay capped.
+- **`close_position` reserves the contract synchronously**, so a *concurrent* second close
+  (not just a sequential retry) backs off — and the reservation is released if nothing was
+  actually dispatched (no position, dry-run, or a rejected order), so a real retry isn't
+  stranded. The cooldown also evicts stale entries.
+- **Order serialization is per-side**, so an urgent exit (SELL) no longer waits behind a
+  slow entry (BUY) while still closing the same-side TOCTOU on both buys and sells.
+- **Bracket exit checks use the effective fill price**, catching a *marketable* limit
+  entry (which fills at ~market, not its limit) while still allowing a legit "buy the dip"
+  bracket.
+- **Order symbols are whitespace-stripped** so a padded symbol can't slip past the
+  deny/allow-list.
+
 ### Hardened — third audit pass (new lenses: diff, lifecycle/concurrency, API-assumptions)
 - **`close_position` won't sell a position twice during portfolio lag.** A repeat close of
   the same contract within a cooldown is refused (pointing to `order_status`) — so the

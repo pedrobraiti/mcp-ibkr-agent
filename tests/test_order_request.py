@@ -37,6 +37,12 @@ def test_limit_order_requires_limit_price():
         OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1, order_type=OrderType.LIMIT)
 
 
+def test_symbol_whitespace_is_stripped():
+    # A padded symbol must be normalized so it can't slip past the deny/allow-list.
+    order = OrderRequest(symbol="  AAPL ", side=OrderSide.BUY, quantity=1)
+    assert order.symbol == "AAPL"
+
+
 def test_cash_qty_rejected_on_sell():
     # cashQty is buy-only; a cash SELL has no quantity and would bypass the short guard.
     with pytest.raises(ValidationError):
