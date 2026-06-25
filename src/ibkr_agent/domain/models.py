@@ -74,6 +74,17 @@ class OrderRequest(BaseModel):
     def _validate(self) -> OrderRequest:
         if (self.quantity is None) == (self.cash_qty is None):
             raise ValueError("Provide exactly one of 'quantity' and 'cash_qty'.")
+        # cashQty is simulated by IBKR for MARKET BUYS only — it is rejected on sells and
+        # on limit/stop orders. Enforce it here so a malformed cash order can't be built
+        # and slip past the side-specific guards (a cash SELL has no quantity, which would
+        # otherwise bypass the naked-short check entirely).
+        if self.cash_qty is not None and (
+            self.side is not OrderSide.BUY or self.order_type is not OrderType.MARKET
+        ):
+            raise ValueError(
+                "cash_qty is only valid for a MARKET BUY; sells, limits and stops must "
+                "use 'quantity'."
+            )
         if self.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and self.limit_price is None:
             raise ValueError(f"A {self.order_type.value} order requires 'limit_price'.")
         if self.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and self.stop_price is None:
@@ -101,9 +112,29 @@ class BracketRequest(BaseModel):
     stop_loss_price: Decimal = Field(gt=0, description="Stop trigger price of the loss exit.")
 
     @model_validator(mode="after")
-    def _entry_uses_quantity(self) -> BracketRequest:
+    def _entry_and_exits_consistent(self) -> BracketRequest:
         if self.entry.quantity is None:
             raise ValueError("A bracket entry must be sized by 'quantity', not 'cash_qty'.")
+        # The take-profit and stop-loss must sit on the correct sides, or the bracket
+        # liquidates the moment the entry fills. For a BUY entry (exits are SELLs):
+        # take_profit ABOVE, stop_loss BELOW (and below the entry limit, if any). A SELL
+        # entry is the mirror image.
+        if self.entry.side is OrderSide.BUY:
+            if self.take_profit_price <= self.stop_loss_price:
+                raise ValueError("For a BUY bracket, take_profit must be above stop_loss.")
+            limit = self.entry.limit_price
+            if limit is not None and not (self.take_profit_price > limit > self.stop_loss_price):
+                raise ValueError(
+                    "For a BUY bracket: take_profit > entry limit_price > stop_loss."
+                )
+        else:
+            if self.take_profit_price >= self.stop_loss_price:
+                raise ValueError("For a SELL bracket, take_profit must be below stop_loss.")
+            limit = self.entry.limit_price
+            if limit is not None and not (self.take_profit_price < limit < self.stop_loss_price):
+                raise ValueError(
+                    "For a SELL bracket: take_profit < entry limit_price < stop_loss."
+                )
         return self
 
 

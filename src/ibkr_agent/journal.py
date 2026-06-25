@@ -43,6 +43,7 @@ class TradeJournal:
         notional: Decimal | None,
         result: OrderResult | None = None,
         error: Exception | None = None,
+        sent: bool = False,
     ) -> dict:
         entry = {
             "timestamp": datetime.now(self._tz).isoformat(),
@@ -54,6 +55,10 @@ class TradeJournal:
             "quantity": str(request.quantity) if request.quantity is not None else None,
             "notional": str(notional) if notional is not None else None,
             "dry_run": result.dry_run if result is not None else dry_run,
+            # `sent` = dispatched to the broker (it may have filled even if no order_id
+            # came back, e.g. a timeout/503). The duplicate guard keys off this so a
+            # retry of a sent-but-unconfirmed order is still caught.
+            "sent": bool(sent) or (result is not None and result.order_id is not None),
             "order_id": result.order_id if result is not None else None,
             "status": result.status.value if result is not None else "error",
             "message": (result.message if result is not None else None)
@@ -106,8 +111,11 @@ class TradeJournal:
         cutoff = datetime.now(self._tz) - timedelta(seconds=window_seconds)
         size = str(request.cash_qty if request.cash_qty is not None else request.quantity)
         for entry in reversed(self.read(limit=200)):
-            if not entry.get("order_id"):
-                continue  # only orders that were actually placed count as duplicates
+            # An order counts as a possible duplicate if it was dispatched to the broker
+            # (`sent`) — even if no order_id came back (timeout/503), because it may have
+            # filled. Pure guard-blocked attempts (never sent) don't count.
+            if not (entry.get("sent") or entry.get("order_id")):
+                continue
             entry_size = entry.get("cash_qty") or entry.get("quantity")
             if (
                 entry.get("symbol") == request.symbol.upper()

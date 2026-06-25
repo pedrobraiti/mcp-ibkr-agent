@@ -37,6 +37,42 @@ async def test_resolve_conid_prefers_us_contract():
 
 
 @respx.mock
+async def test_resolve_conid_returns_none_when_no_us_listing():
+    # No isUS contract → None (fail closed). We must NOT trade a foreign listing.
+    respx.get(f"{BASE}/trsrv/stocks").mock(
+        return_value=httpx.Response(
+            200,
+            json={"VOD": [{"contracts": [
+                {"conid": 111, "exchange": "LSE", "isUS": False},
+                {"conid": 222, "exchange": "IBIS", "isUS": False},
+            ]}]},
+        )
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+    assert await md.resolve_conid("VOD") is None
+    await client.aclose()
+
+
+@respx.mock
+async def test_get_quote_strips_state_prefix_from_last_price():
+    # IBKR field 31 can carry a state prefix like "C195.50" (prev close) — it must parse.
+    respx.get(f"{BASE}/trsrv/stocks").mock(
+        return_value=httpx.Response(
+            200, json={"AAPL": [{"contracts": [{"conid": 265598, "isUS": True}]}]}
+        )
+    )
+    respx.get(f"{BASE}/iserver/marketdata/snapshot").mock(
+        return_value=httpx.Response(200, json=[{"conid": 265598, "31": "C195.50"}])
+    )
+    client = CpapiClient(BASE)
+    md = CpapiMarketData(client, ACCT, warmup_delay_seconds=0)
+    quote = await md.get_quote("AAPL")
+    assert quote.last_price == Decimal("195.50")
+    await client.aclose()
+
+
+@respx.mock
 async def test_get_quote_handles_snapshot_warmup():
     respx.get(f"{BASE}/trsrv/stocks").mock(
         return_value=httpx.Response(

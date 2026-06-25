@@ -81,6 +81,7 @@ class GuardedBroker:
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
         notional: Decimal | None = None
+        sent = False
         try:
             notional = await self._run_guards(request)
             if self._dry_run:
@@ -92,12 +93,13 @@ class GuardedBroker:
                     message=f"dry-run: order validated, NOT sent (notional ~US${notional}).",
                 )
             else:
+                sent = True  # dispatched to the broker — may fill even if this call errors
                 result = await self._inner.place_order(request)
 
-            self._record(request, notional, result=result)
+            self._record(request, notional, result=result, sent=sent)
             return result
         except Exception as exc:  # noqa: BLE001 - record the failed attempt, then re-raise
-            self._record(request, notional, error=exc)
+            self._record(request, notional, error=exc, sent=sent)
             raise
 
     async def place_bracket(self, bracket: BracketRequest) -> list[OrderResult]:
@@ -105,8 +107,10 @@ class GuardedBroker:
         # the same submission and only activate after the entry fills.
         entry = bracket.entry
         notional: Decimal | None = None
+        sent = False
         try:
             notional = await self._run_guards(entry)
+            await self._check_bracket_exits(bracket)
             if self._dry_run:
                 results = [
                     OrderResult(
@@ -118,12 +122,13 @@ class GuardedBroker:
                     )
                 ]
             else:
+                sent = True
                 results = await self._inner.place_bracket(bracket)
 
-            self._record(entry, notional, result=results[0] if results else None)
+            self._record(entry, notional, result=results[0] if results else None, sent=sent)
             return results
         except Exception as exc:  # noqa: BLE001 - record the failed attempt, then re-raise
-            self._record(entry, notional, error=exc)
+            self._record(entry, notional, error=exc, sent=sent)
             raise
 
     async def _run_guards(self, request: OrderRequest) -> Decimal | None:
@@ -150,19 +155,19 @@ class GuardedBroker:
                 "Market closed: orders are only accepted during regular trading hours (RTH)."
             )
 
-        notional = await self._notional(request)
         # The value limit caps how much is *spent* — it applies to entries (BUYS).
-        # Exits (sells, closes, stop-losses) reduce exposure, so capping them could
-        # trap a position larger than the limit; they are not value-gated.
-        if (
-            request.side is OrderSide.BUY
-            and notional is not None
-            and notional > self._max_order_value
-        ):
-            raise SafetyError(
-                f"Order of ~US${notional} exceeds the MAX_ORDER_VALUE limit "
-                f"(US${self._max_order_value})."
-            )
+        # Exits (sells, closes, stop-losses) reduce exposure, so they are not
+        # value-gated. Crucially, we only compute the notional for a BUY: pricing a
+        # SELL would fetch a quote and could RAISE on a missing price, which would
+        # trap an exit — exactly what must never happen.
+        notional: Decimal | None = None
+        if request.side is OrderSide.BUY:
+            notional = await self._notional(request)
+            if notional is not None and notional > self._max_order_value:
+                raise SafetyError(
+                    f"Order of ~US${notional} exceeds the MAX_ORDER_VALUE limit "
+                    f"(US${self._max_order_value})."
+                )
 
         await self._check_no_naked_short(request)
         await self._check_stop_not_inverted(request)
@@ -194,6 +199,12 @@ class GuardedBroker:
         account_id = info.get("account_id")
         is_paper = info.get("is_paper")
 
+        # Fail CLOSED on any identity uncertainty — not knowing is itself a stop signal.
+        if self._configured_account_id and not account_id:
+            raise SafetyError(
+                "Could not read the logged-in account from IBKR (no selectedAccount). "
+                "Refusing to trade until the account can be confirmed."
+            )
         if (
             self._configured_account_id
             and account_id
@@ -203,6 +214,12 @@ class GuardedBroker:
                 f"Account mismatch: configured IBKR_ACCOUNT_ID={self._configured_account_id} "
                 f"but the gateway is logged into {account_id}. Refusing to trade until they "
                 "match — fix .env or log in to the intended account."
+            )
+        if is_paper is None:
+            raise SafetyError(
+                "Could not confirm from IBKR whether this is a PAPER or a LIVE (real-money) "
+                "account (isPaper is missing/unrecognized). Refusing to trade — verify the "
+                "gateway login before retrying."
             )
 
         if is_paper is False:  # a real-money account
@@ -235,6 +252,11 @@ class GuardedBroker:
             return
         try:
             conid = await self._market_data.resolve_conid(request.symbol)
+            if conid is None:
+                return  # can't identify the instrument → don't trap the exit
+            # Refresh first: a position bought moments ago may not be visible yet, and
+            # blocking its sell as a "short" would trap the exit.
+            await self._market_data.invalidate_positions()
             positions = await self._market_data.get_positions()
         except Exception:  # noqa: BLE001 - can't verify holdings; never trap an exit
             return
@@ -278,6 +300,34 @@ class GuardedBroker:
                 "it would trigger immediately. A buy-stop sits ABOVE the market — check the price."
             )
 
+    async def _check_bracket_exits(self, bracket: BracketRequest) -> None:
+        """Reject a bracket whose stop-loss exit would fire the instant the entry fills.
+
+        ``BracketRequest`` already enforces take-profit/stop-loss are on the correct
+        sides of each other; here we add the market-relative check (a BUY entry's SELL
+        stop-loss must sit below the current price, and vice-versa). Skipped if no price.
+        """
+        entry = bracket.entry
+        exit_is_sell = entry.side is OrderSide.BUY
+        try:
+            quote = await self._market_data.get_quote(entry.symbol)
+        except Exception:  # noqa: BLE001 - no price to sanity-check against; allow it
+            return
+        last = quote.last_price if quote else None
+        if last is None:
+            return
+        stop_loss = bracket.stop_loss_price
+        if exit_is_sell and stop_loss >= last:
+            raise SafetyError(
+                f"Bracket stop-loss {stop_loss} is at/above the current price ({last}); the "
+                "SELL stop would trigger immediately when the entry fills — check the levels."
+            )
+        if not exit_is_sell and stop_loss <= last:
+            raise SafetyError(
+                f"Bracket stop-loss {stop_loss} is at/below the current price ({last}); the "
+                "BUY stop would trigger immediately when the entry fills — check the levels."
+            )
+
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         # Read-only estimate (margin/commission/warnings); no guard needed.
         return await self._inner.preview_order(request)
@@ -311,6 +361,7 @@ class GuardedBroker:
         *,
         result: OrderResult | None = None,
         error: Exception | None = None,
+        sent: bool = False,
     ) -> None:
         if self._journal is None:
             return
@@ -322,6 +373,7 @@ class GuardedBroker:
                 notional=notional,
                 result=result,
                 error=error,
+                sent=sent,
             )
         except Exception:  # noqa: BLE001 - journaling must never break trading
             logger.warning("Failed to journal an order attempt", exc_info=True)

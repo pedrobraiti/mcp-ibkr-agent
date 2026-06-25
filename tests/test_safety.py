@@ -63,6 +63,8 @@ class FakeMarketData:
             return []
         return [Position(conid=1, symbol="AAPL", quantity=self._held)]
 
+    async def invalidate_positions(self) -> None: ...
+
 
 def _guarded(broker, md, **kw):
     defaults = dict(
@@ -288,3 +290,43 @@ async def test_inverted_stop_blocked():
             OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=1,
                          order_type=OrderType.STOP, stop_price=Decimal("55"))
         )
+
+
+async def test_unknown_paper_status_fails_closed():
+    # If IBKR can't confirm paper vs live (is_paper None), refuse to trade.
+    async def provider():
+        return {"account_id": "U1", "is_paper": None, "account_type": None}
+
+    guarded = _guarded(
+        FakeBroker(), FakeMarketData(Decimal("10")),
+        account_info_provider=provider, configured_account_id="U1",
+    )
+    with pytest.raises(SafetyError, match="PAPER or a LIVE"):
+        await guarded.place_order(_buy("AAPL", "10"))
+
+
+async def test_exit_not_trapped_when_no_quote():
+    # A SELL must never be blocked just because there's no price — exits can't be trapped.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(None, held=Decimal("5")))
+    result = await guarded.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)
+    )
+    assert result.order_id == "real-1"
+
+
+async def test_bracket_stop_loss_inverted_vs_market_blocked():
+    from ibkr_agent.domain.models import BracketRequest
+
+    # BUY bracket, but stop_loss (95) is ABOVE the market (last=50): the SELL stop would
+    # fire instantly when the entry fills. (tp>sl passes the model; the guard catches this.)
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("50")))
+    bracket = BracketRequest(
+        entry=OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1),
+        take_profit_price=Decimal("120"),
+        stop_loss_price=Decimal("95"),
+    )
+    with pytest.raises(SafetyError, match="trigger immediately"):
+        await guarded.place_bracket(bracket)
+    assert broker.placed == []

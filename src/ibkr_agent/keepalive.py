@@ -22,11 +22,25 @@ logger = logging.getLogger("ibkr_agent.keepalive")
 
 
 def _notify_webhook(url: str, message: str) -> None:
-    """POST a one-way notification (no account data). Best-effort; never raises."""
+    """POST a one-way notification (no account data). Best-effort; never raises.
+
+    The POST is synchronous (httpx) but this runs inside the async keep-alive loop, so a
+    slow/unreachable webhook would stall the loop (delaying tickles) for up to the timeout.
+    When a loop is running we offload it to a thread (fire-and-forget); otherwise we call
+    it inline.
+    """
+    def _post() -> None:
+        try:
+            httpx.post(url, json={"text": message}, timeout=5)
+        except Exception:  # noqa: BLE001
+            logger.warning("Reauth webhook POST failed.")
+
     try:
-        httpx.post(url, json={"text": message}, timeout=5)
-    except Exception:  # noqa: BLE001
-        logger.warning("Reauth webhook POST failed.")
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _post()
+        return
+    loop.run_in_executor(None, _post)
 
 
 def _alert(reason: str) -> None:

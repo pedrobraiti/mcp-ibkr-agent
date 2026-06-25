@@ -212,6 +212,16 @@ async def close_position(symbol: str) -> dict:
     try:
         await svc.auth.ensure_session()
         conid = await svc.market_data.resolve_conid(symbol)
+        if conid is None:
+            return _ok(
+                {
+                    "closed": False,
+                    "reason": (
+                        f"Could not resolve {symbol.upper()} to a tradable US contract — "
+                        "cannot confirm or close a position. Check the symbol."
+                    ),
+                }
+            )
         await svc.market_data.invalidate_positions()
         rows = await svc.market_data.get_positions()
         position = next((p for p in rows if p.conid == conid), None)

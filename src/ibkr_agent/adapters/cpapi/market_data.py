@@ -60,7 +60,7 @@ class CpapiMarketData:
         return Quote(
             symbol=symbol.upper(),
             conid=conid,
-            last_price=_to_decimal(snapshot.get(FIELD_LAST)),
+            last_price=_last_price(snapshot.get(FIELD_LAST)),
             bid=_to_decimal(snapshot.get(FIELD_BID)),
             ask=_to_decimal(snapshot.get(FIELD_ASK)),
         )
@@ -99,7 +99,7 @@ class CpapiMarketData:
                 Quote(
                     symbol=symbol,
                     conid=conid,
-                    last_price=_to_decimal(snapshot.get(FIELD_LAST)),
+                    last_price=_last_price(snapshot.get(FIELD_LAST)),
                     bid=_to_decimal(snapshot.get(FIELD_BID)),
                     ask=_to_decimal(snapshot.get(FIELD_ASK)),
                 )
@@ -152,11 +152,9 @@ def _pick_us_conid(data: dict, symbol: str) -> int | None:
         for contract in contracts:
             if contract.get("isUS") and contract.get("conid"):
                 return int(contract["conid"])
-    # Fallback: first available conid, if none is marked as US.
-    for entry in entries:
-        for contract in entry.get("contracts", []) if isinstance(entry, dict) else []:
-            if contract.get("conid"):
-                return int(contract["conid"])
+    # No US listing → return None (fail closed). We deliberately do NOT fall back to an
+    # arbitrary foreign listing: that would trade the wrong instrument in a foreign
+    # currency (and a wrong-currency price would mis-size the value cap).
     return None
 
 
@@ -184,6 +182,18 @@ def _amount(data: dict, key: str) -> Decimal | None:
     raw = _to_decimal(field.get("amount")) if isinstance(field, dict) else _to_decimal(field)
     # Balance values come as floats with noise (e.g. 8.869999...) — round to cents.
     return raw.quantize(Decimal("0.01")) if raw is not None else None
+
+
+def _last_price(value: object) -> Decimal | None:
+    """Parse IBKR field 31 ("Last"), stripping a leading state letter if present.
+
+    The gateway prefixes the last price with a state code when there's no live trade:
+    ``"C195.50"`` (previous close, pre/post-market) or ``"H195.50"`` (halted). Without
+    stripping it, ``_to_decimal`` returns None and a real price is reported as missing.
+    """
+    if isinstance(value, str) and value[:1].isalpha():
+        value = value[1:]
+    return _to_decimal(value)
 
 
 def _to_decimal(value: object) -> Decimal | None:

@@ -28,6 +28,25 @@ versioning follows [SemVer](https://semver.org/).
   a single bad line no longer bricks the daily-spend cap, the duplicate guard, or trading
   itself. Journaling failures are now logged rather than silently swallowed.
 
+### Hardened (multi-agent audit — see ADR-013)
+- **Uncertainty fails closed.** Refuse to trade when paper-vs-live can't be confirmed from
+  IBKR (`isPaper` missing/unparseable), when the logged-in account is unreadable, or on a
+  non-`U`/non-`DU` account whose status is unknown — instead of guessing "paper".
+- **Exits are never trapped.** The value-cap quote is fetched only for BUYs (a missing
+  price no longer blocks a SELL); the naked-short check skips when holdings can't be
+  confirmed and refreshes positions first.
+- **Brackets can't self-liquidate.** `BracketRequest` validates take-profit/stop-loss
+  ordering; the guard rejects a stop-loss on the wrong side of the live market.
+- **Idempotency keyed on "sent".** A dispatched-but-unconfirmed order (timeout/503) is
+  journaled as `sent`, so a retry is caught as a duplicate; a 503 whose lookup fails is
+  reported indeterminate, not resent. `cancel_order` reports `CANCELLED` only when the
+  gateway confirms it (otherwise `pending`).
+- **Misconfig is loud / data is cleaner.** A typo'd safety-prefixed `.env` key is warned
+  about at startup; `cash_qty` is pinned to MARKET BUY; conid resolution no longer falls
+  back to a foreign listing; field-31 state-prefixed prices (`"C…"`/`"H…"`) are parsed.
+- **`TRADING_ALLOW_SHORT`** (default `false`) gates whether a SELL may exceed the held
+  position.
+
 ### Docs
 - Troubleshoot `ERR_CONNECTION_REFUSED` (the gateway simply isn't running) distinctly
   from the "logged in but nothing happens" case.

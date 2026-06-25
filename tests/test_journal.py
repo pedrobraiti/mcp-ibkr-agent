@@ -60,6 +60,30 @@ def test_read_skips_corrupt_lines_instead_of_crashing(tmp_path):
     assert journal.spent_today() == Decimal("30")
 
 
+def test_sent_but_unconfirmed_order_counts_as_duplicate(tmp_path):
+    # An order dispatched to the broker but whose call errored (timeout/503) has no
+    # order_id, yet may have filled — a retry must still be caught as a duplicate.
+    journal = TradeJournal(tmp_path / "trades.jsonl")
+    request = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))
+
+    journal.record(request=request, mode=TradingMode.LIVE, dry_run=False,
+                   notional=Decimal("10"), error=RuntimeError("timeout"), sent=True)
+
+    assert journal.has_recent_duplicate(request, 5) is True
+
+
+def test_guard_blocked_attempt_is_not_a_duplicate(tmp_path):
+    # An attempt blocked BEFORE being sent (sent=False, no order_id) must not block a
+    # later legitimate order.
+    journal = TradeJournal(tmp_path / "trades.jsonl")
+    request = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))
+
+    journal.record(request=request, mode=TradingMode.LIVE, dry_run=False,
+                   notional=Decimal("10"), error=RuntimeError("market closed"), sent=False)
+
+    assert journal.has_recent_duplicate(request, 5) is False
+
+
 def test_has_recent_duplicate(tmp_path):
     journal = TradeJournal(tmp_path / "trades.jsonl")
     request = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))

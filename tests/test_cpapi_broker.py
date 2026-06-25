@@ -114,6 +114,25 @@ async def test_cancel_order_fills_symbol_from_live_orders():
 
     assert result.symbol == "AAPL"
     assert result.side.value == "BUY"
+    # A bare ack ("msg" only, no order_status) means the cancel was REQUESTED, not
+    # confirmed — we report pending and let the caller confirm, never a false cancel.
+    assert result.status.value == "pending"
+    await client.aclose()
+
+
+@respx.mock
+async def test_cancel_order_reports_cancelled_only_when_gateway_confirms():
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(200, json={"orders": []})
+    )
+    respx.delete(f"{BASE}/iserver/account/{ACCT}/order/77").mock(
+        return_value=httpx.Response(200, json={"order_id": "77", "order_status": "Cancelled"})
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver)
+
+    result = await broker.cancel_order("77")
+
     assert result.status.value == "cancelled"
     await client.aclose()
 
@@ -260,6 +279,26 @@ async def test_order_post_503_retried_when_order_did_not_land():
 
     assert result.order_id == "9"
     assert posts.call_count == 2  # retried after confirming it hadn't landed
+    await client.aclose()
+
+
+@respx.mock
+async def test_order_post_503_not_resent_when_landing_is_unknown():
+    # 503 on the POST, and the follow-up lookup ALSO fails → we cannot tell whether the
+    # order landed, so we must NOT resend (would risk a duplicate). Expect a raise, and
+    # exactly one POST attempt.
+    posts = respx.post(f"{BASE}/iserver/account/{ACCT}/orders").mock(
+        side_effect=[httpx.Response(503, json={"error": "busy"})]
+    )
+    respx.get(f"{BASE}/iserver/account/orders").mock(
+        return_value=httpx.Response(503, json={"error": "busy"})  # lookup also fails
+    )
+    client = CpapiClient(BASE)
+    broker = CpapiBroker(client, ACCT, _resolver, id_factory=lambda: "coid-1")
+
+    with pytest.raises(CpapiError, match="UNKNOWN whether the order landed"):
+        await broker.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=1))
+    assert posts.call_count == 1  # never resent on an inconclusive lookup
     await client.aclose()
 
 

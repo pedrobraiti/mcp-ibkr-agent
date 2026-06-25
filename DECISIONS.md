@@ -271,3 +271,57 @@ would place the order twice (real money).
 (it retries faster than a human), and a duplicate order is the worst outcome — so the
 fix is idempotency, not just a retry count. Trailing stops complete the protective-order
 set. Both were validated against the live API, where the field and warning quirks actually live.
+
+---
+
+## ADR-013 — Fail-closed on identity uncertainty; multi-agent audit and what we deliberately did NOT do
+
+**Context.** A live session surfaced a grotesque-but-invisible failure: the agent
+couldn't reliably tell whether it was on a paper or a real account, because the
+money-lock trusted the cosmetic `IBKR_TRADING_MODE` label instead of IBKR's real
+`isPaper`. That prompted a deeper, **multi-agent adversarial review** (six focused
+subagents + a macro pass) that found a family of the same shape: things that are
+*uncertain* (account identity, instrument identity, whether a sent order landed) were
+failing **open**.
+
+**Decision — one principle: uncertainty fails closed.**
+
+- **Account is ground truth, not the label.** `account_info()` coerces `isPaper`
+  robustly (bool/str/int) and only marks paper on a known `DU` prefix; anything else is
+  `None` (unknown). The guard refuses to trade when the configured account ≠ the
+  logged-in one, when a real account isn't armed with `TRADING_ALLOW_LIVE`, when the
+  label disagrees with reality, **or when paper-vs-live can't be confirmed at all**.
+- **Exits are never trapped.** The value-cap notional is computed only for BUYs (pricing
+  a SELL could raise on a missing quote and block an exit); the naked-short check skips
+  when holdings can't be confirmed and refreshes positions first.
+- **Brackets can't self-liquidate.** `BracketRequest` validates take-profit/stop-loss
+  sit on the correct sides; the guard also rejects a stop-loss already on the wrong side
+  of the live market.
+- **Idempotency by "sent", not by order_id.** A dispatched-but-unconfirmed order
+  (timeout/503) is journaled as `sent`, so the duplicate guard catches a retry that may
+  have already filled. A 503 whose follow-up lookup fails is reported as *indeterminate*
+  rather than blindly resent. Cancels report `CANCELLED` only when the gateway confirms.
+- **Misconfig is loud.** A safety-prefixed `.env` key that maps to no setting (a typo
+  that would silently disable a cap/list) is warned about at startup. `_pick_us_conid`
+  no longer falls back to a foreign listing; field-31 state prefixes ("C…"/"H…") are
+  parsed.
+
+**Deliberately NOT done (judged filler for this project — recorded so it's a choice, not an oversight).**
+
+- **A lock around guard-read→place→journal-write (TOCTOU).** The window only opens under
+  *concurrent* order calls; a single agent issues tool calls serially, so it doesn't
+  occur in practice. Revisit if multiple concurrent callers are ever introduced.
+- **`fsync`/atomic journal append.** Guards against a torn line from a crash mid-write of
+  a tiny JSON record — rare, and a corrupt line is already skipped-and-logged.
+- **Gating on the `competing` session flag, per-account base currency, and assorted
+  LOW mislabels.** Negligible for a single-session USD account.
+- **Sending order numbers as `Decimal` instead of `float` (a reviewer's "MEDIUM").**
+  Investigated and found to be a **false alarm**: `json.dumps(float(Decimal("100.005")))`
+  is `"100.005"` (Python uses the shortest round-trip repr), so there is no precision
+  loss on the wire. No change made.
+
+**Why.** Robustness is about the *direction* a thing fails, not the count of checks.
+Binding every identity/idempotency decision to fail closed removes the whole class of
+"silently did the wrong thing." The skipped items are documented here so a future reader
+sees they were weighed and declined, not missed — and so the false alarm isn't
+re-litigated.

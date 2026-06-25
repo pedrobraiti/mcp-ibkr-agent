@@ -141,20 +141,32 @@ class CpapiBroker:
             except CpapiError as exc:
                 if exc.status != 503 or attempt == _ORDER_POST_RETRIES:
                     raise
-                landed = await self._orders_by_coids(coids)
+                # The 503 may have come AFTER the order landed. Look it up by cOID. If the
+                # lookup itself fails we cannot tell whether it landed, so we must NOT
+                # resend (that risks a duplicate) — surface an indeterminate error instead.
+                try:
+                    landed = await self._orders_by_coids(coids)
+                except CpapiError as lookup_exc:
+                    raise CpapiError(
+                        "Order POST returned 503 and the follow-up lookup failed, so it is "
+                        "UNKNOWN whether the order landed. Not resending (would risk a "
+                        "duplicate). Check open_orders / trade_history before retrying."
+                    ) from lookup_exc
                 if landed:
                     return landed
+                # Confirmed absent → safe to retry.
         raise CpapiError("Order POST failed after retries.")  # pragma: no cover
 
     async def _orders_by_coids(self, coids: list[str]) -> list[dict]:
-        """Live orders whose ``order_ref`` (the cOID we sent) is in ``coids``, as acks."""
+        """Live orders whose ``order_ref`` (the cOID we sent) is in ``coids``, as acks.
+
+        Propagates CpapiError on failure (the caller must distinguish "confirmed absent"
+        from "couldn't check" — only the former is safe to resend).
+        """
         wanted = set(coids)
-        try:
-            # Warmup: the 1st call instantiates the orders endpoint, the 2nd returns data.
-            await self._client.get("/iserver/account/orders")
-            data = await self._client.get("/iserver/account/orders")
-        except CpapiError:
-            return []
+        # Warmup: the 1st call instantiates the orders endpoint, the 2nd returns data.
+        await self._client.get("/iserver/account/orders")
+        data = await self._client.get("/iserver/account/orders")
         orders = data.get("orders", []) if isinstance(data, dict) else []
         acks = []
         for order in orders:
@@ -198,14 +210,26 @@ class CpapiBroker:
         response = await self._client.delete(
             f"/iserver/account/{self._account_id}/order/{order_id}"
         )
-        message = response.get("msg") if isinstance(response, dict) else str(response)
+        data = response if isinstance(response, dict) else {}
+        message = data.get("msg") if data else (str(response) if response is not None else None)
+        # IBKR's DELETE only ACKNOWLEDGES the cancel request — it is not confirmation the
+        # order is gone (an already-filled order returns 200 with a "cannot be cancelled"
+        # msg). Only report CANCELLED when the gateway explicitly says so; otherwise report
+        # PENDING and let the caller confirm via order_status. Never claim a false cancel.
+        raw_status = str(data.get("order_status") or data.get("status") or "").lower()
+        if "cancel" in raw_status:
+            status = OrderStatus.CANCELLED
+        elif raw_status:
+            status = _map_status(raw_status)
+        else:
+            status = OrderStatus.PENDING
         return OrderResult(
             order_id=order_id,
-            status=OrderStatus.CANCELLED,
+            status=status,
             symbol=symbol,
             side=side,
             message=message,
-            raw=response if isinstance(response, dict) else None,
+            raw=data or None,
         )
 
     async def get_live_orders(self) -> list[OrderResult]:
