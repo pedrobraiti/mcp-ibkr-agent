@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
@@ -34,6 +35,13 @@ from ..domain.ports import BrokerPort, MarketDataPort
 from ..journal import TradeJournal
 
 logger = logging.getLogger(__name__)
+
+# After a covering BUY is waved past the value cap, IBKR's portfolio can keep showing the
+# old (un-reduced) short for tens of seconds. Without memory, a split or repeated "cover"
+# against that stale short would each pass and build an arbitrarily large LONG past the cap.
+# So a conid gets one uncapped cover per this window; further buys are capped until the
+# position settles. The reservation only ever persists (fail-safe: it caps, never uncaps).
+_COVER_COOLDOWN_SECONDS = 45.0
 
 
 class SafetyError(Exception):
@@ -82,6 +90,8 @@ class GuardedBroker:
         # Last account identity that passed every check — used as a fallback so a transient
         # failure reading the account doesn't trap an exit (see _verify_account).
         self._verified_identity: dict | None = None
+        # conid -> monotonic time of the last uncapped covering buy (see _COVER_COOLDOWN).
+        self._recent_covers: dict[int, float] = {}
         # Serializes the check->dispatch->journal critical section per SIDE: the journal
         # guards (daily cap is BUY-only; the duplicate guard matches on side) only ever
         # conflict same-side, so one lock per side closes the TOCTOU without making an
@@ -296,7 +306,21 @@ class GuardedBroker:
         held = sum((p.quantity for p in positions if p.conid == conid), Decimal(0))
         # held < 0 is a short; buying up to its size covers it (a pure exit). Buying MORE
         # than the short is partly opening, so keep that capped.
-        return held < 0 and request.quantity <= -held
+        if not (held < 0 and request.quantity <= -held):
+            return False
+        # Allow only ONE uncapped cover per conid per window. The position read above can be
+        # stale (lag), so a second "cover" before it settles must NOT be waved through again
+        # — that's how a split/repeat cover would bypass the cap. This runs under the per-
+        # side lock and is synchronous (no await), so the check-and-claim is atomic.
+        now = time.monotonic()
+        for stale in [
+            c for c, ts in self._recent_covers.items() if now - ts >= _COVER_COOLDOWN_SECONDS
+        ]:
+            self._recent_covers.pop(stale, None)
+        if conid in self._recent_covers:
+            return False  # already covered this conid recently → cap further buys (fail-safe)
+        self._recent_covers[conid] = now
+        return True
 
     async def _check_no_naked_short(self, request: OrderRequest) -> None:
         """Block a SELL that exceeds the held position (which would open a short).

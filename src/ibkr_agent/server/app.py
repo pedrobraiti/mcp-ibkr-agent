@@ -73,6 +73,9 @@ mcp = FastMCP("mcp-ibkr-agent", lifespan=_lifespan)
 _CLOSE_COOLDOWN_SECONDS = 45.0
 _recent_closes: dict[int, float] = {}
 _NON_DISPATCH_STATUSES = {"rejected", "inactive", "cancelled"}
+# Sentinel timestamp for an in-flight close: `now - inf` is always < the cooldown (so a
+# second close is refused) and never >= it (so eviction can't drop a still-running close).
+_INFLIGHT = float("inf")
 
 
 def _evict_stale_closes(now: float) -> None:
@@ -256,13 +259,16 @@ async def close_position(symbol: str) -> dict:
                     ),
                 }
             )
-        _recent_closes[conid] = now
-        dispatched = False
+        # Mark it IN-FLIGHT with a sentinel that never evicts and always refuses, so a
+        # staggered retry can't slip past even if the dispatch outlasts the cooldown.
+        _recent_closes[conid] = _INFLIGHT
+        order_attempted = False
         try:
             await svc.market_data.invalidate_positions()
             rows = await svc.market_data.get_positions()
             position = next((p for p in rows if p.conid == conid), None)
             if position is None or position.quantity == 0:
+                _recent_closes.pop(conid, None)  # nothing was sent → release
                 return _ok(
                     {
                         "closed": False,
@@ -275,14 +281,22 @@ async def close_position(symbol: str) -> dict:
 
             side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
             request = OrderRequest(symbol=symbol, side=side, quantity=abs(position.quantity))
+            order_attempted = True
             result = await svc.broker.place_order(request)
-            # Keep the cooldown only if a live order actually went out; otherwise release it
-            # so a legitimate retry isn't stranded.
             dispatched = not result.dry_run and result.status.value not in _NON_DISPATCH_STATUSES
+            if dispatched:
+                _recent_closes[conid] = time.monotonic()  # start the cooldown from completion
+            else:
+                _recent_closes.pop(conid, None)  # known no-dispatch (dry-run/rejected) → release
             return _ok(result.model_dump(mode="json"))
-        finally:
-            if not dispatched:
+        except Exception:
+            # The order may have landed (e.g. an indeterminate 503) — HOLD the cooldown so a
+            # retry can't double-close; only release if we never even attempted to send.
+            if order_attempted:
+                _recent_closes[conid] = time.monotonic()
+            else:
                 _recent_closes.pop(conid, None)
+            raise
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

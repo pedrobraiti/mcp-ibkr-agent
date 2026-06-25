@@ -351,6 +351,70 @@ async def test_close_position_concurrent_double_is_prevented(monkeypatch):
     app._recent_closes.clear()
 
 
+async def test_close_position_holds_reservation_on_indeterminate(monkeypatch):
+    # If place_order RAISES (e.g. an indeterminate 503 that may have landed), the
+    # reservation must be HELD so a retry can't double-close — never released.
+    app._recent_closes.clear()
+
+    class _RaisingInner(_FakeInner):
+        async def place_order(self, request: OrderRequest) -> OrderResult:
+            self.placed.append(request)
+            raise RuntimeError("UNKNOWN whether the order landed")
+
+    market_data = _FakeMarketData()
+    inner = _RaisingInner()
+    broker = GuardedBroker(
+        inner, market_data, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=market_data, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    first = await app.close_position("AAPL")
+    assert first["ok"] is False  # the indeterminate error surfaced
+    second = await app.close_position("AAPL")
+    assert second["data"]["closed"] is False  # reservation held → retry backs off
+    assert "twice" in second["data"]["reason"]
+    assert len(inner.placed) == 1  # only the first attempt was sent
+    app._recent_closes.clear()
+
+
+async def test_close_position_inflight_reservation_not_evicted(monkeypatch):
+    import asyncio
+
+    app._recent_closes.clear()
+    monkeypatch.setattr(app, "_CLOSE_COOLDOWN_SECONDS", 0.05)
+
+    class _SlowInner(_FakeInner):
+        async def place_order(self, request: OrderRequest) -> OrderResult:
+            await asyncio.sleep(0.20)  # in-flight LONGER than the (shrunk) cooldown
+            self.placed.append(request)
+            return OrderResult(order_id="x", status=OrderStatus.SUBMITTED,
+                               symbol=request.symbol, side=request.side)
+
+    market_data = _FakeMarketData()
+    inner = _SlowInner()
+    broker = GuardedBroker(
+        inner, market_data, mode=TradingMode.PAPER, allow_live=False, dry_run=False,
+        max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=market_data, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    async def _second():
+        await asyncio.sleep(0.10)  # arrives after the cooldown but while #1 is still in-flight
+        return await app.close_position("AAPL")
+
+    _first, second = await asyncio.gather(app.close_position("AAPL"), _second())
+    assert second["data"]["closed"] is False  # in-flight reservation was NOT evicted
+    assert len(inner.placed) == 1
+    app._recent_closes.clear()
+
+
 async def test_close_position_releases_cooldown_on_rejected(monkeypatch):
     app._recent_closes.clear()
 

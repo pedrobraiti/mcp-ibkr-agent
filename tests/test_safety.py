@@ -420,6 +420,17 @@ async def test_opening_buy_is_still_capped_when_not_covering_a_short():
         await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
 
 
+async def test_repeated_cover_of_the_same_short_is_capped():
+    # The first cover of a short is uncapped; a second one against the still-stale short
+    # (the split/repeat bypass) must be capped, or a buy could build a long past the cap.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("-5")))
+    first = await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+    assert first.order_id == "real-1"
+    with pytest.raises(SafetyError, match="exceeds"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+
+
 async def test_buying_beyond_the_short_stays_capped():
     # Covering 5 but buying 10 is partly opening → keep it capped.
     broker = FakeBroker()

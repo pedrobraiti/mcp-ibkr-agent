@@ -47,6 +47,16 @@ versioning follows [SemVer](https://semver.org/).
 - **`TRADING_ALLOW_SHORT`** (default `false`) gates whether a SELL may exceed the held
   position.
 
+### Hardened — fifth audit pass (closing two fail-opens in the fourth pass's own fixes)
+- **A covering BUY can't bypass the value cap via a stale/split short.** Because IBKR's
+  portfolio lags, a conid now gets only ONE uncapped cover per window; further buys are
+  capped until the position settles (fail-safe — the reservation only ever caps).
+- **`close_position` holds its reservation when the order's fate is unknown.** An
+  indeterminate dispatch (e.g. a 503 that may have landed) or an exception now KEEPS the
+  cooldown so a retry can't double-close, and an in-flight close is marked with a sentinel
+  that can't be evicted mid-flight — closing the fail-open where the reservation was
+  released or evicted exactly when the order might have gone out.
+
 ### Hardened — fourth audit pass (polishing the prior fixes + one structural blind spot)
 - **Covering a SHORT is treated as an exit.** A BUY that closes a short position (which
   `close_position` emits) is no longer value-capped or blocked on a missing price — so a
