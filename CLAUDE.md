@@ -150,6 +150,11 @@ Valet ships safe by default and you must keep it that way:
   do it if the user explicitly asks, understands it means **real money**, and confirms.
 - Orders are blocked outside regular trading hours, above `MAX_ORDER_VALUE`, and when an
   unknown confirmation warning appears.
+- The guard also **fails closed** on account/identity problems: configured account ≠
+  logged-in account, a real (`isPaper=false`) account not armed with
+  `TRADING_ALLOW_LIVE=true`, or `IBKR_TRADING_MODE` disagreeing with the real account. It
+  also blocks an accidental short (SELL > held position, unless `TRADING_ALLOW_SHORT=true`)
+  and an inverted stop (one that would trigger immediately).
 - Before a real order, confirm the symbol, side, and amount back to the user.
 - **Never assume paper vs. live from the config or defaults.** Call `session_status`
   and read `account_type` — if it's `LIVE`, you are moving real money; say so plainly

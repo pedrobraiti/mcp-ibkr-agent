@@ -84,6 +84,7 @@ See `.env.example`. Main keys:
 | `IBKR_TRADING_MODE` | `paper` | A **label only** — it does *not* pick the account. Whether real money is at stake depends on which account you log the gateway into; the ground truth is IBKR's `isPaper` (see `account_type` from `session_status`). |
 | `TRADING_ALLOW_LIVE` | `false` | Hard lock: `live` only trades if `true` |
 | `TRADING_DRY_RUN` | `true` | Validates but **does not send** orders |
+| `TRADING_ALLOW_SHORT` | `false` | Allow a SELL bigger than the held position (opening a short) |
 | `MAX_ORDER_VALUE` | `100.0` | Per-order limit (USD) |
 | `MAX_DAILY_VALUE` | — | Cumulative daily buy cap (empty = no cap) |
 | `DUPLICATE_WINDOW_SECONDS` | `5` | Reject identical orders within this window (`0` = off) |
@@ -198,6 +199,8 @@ Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an 
 - **paper** by default; **live** blocked unless `TRADING_ALLOW_LIVE=true`.
 - **dry-run** on by default (no real order is sent).
 - **Know which account is live.** `session_status` and `portfolio` report `account_type` (`"LIVE"`/`"PAPER"`) straight from IBKR's `isPaper` — not the `IBKR_TRADING_MODE` label, which can disagree with the account the gateway is actually logged into. A LIVE account also returns an explicit `warning`. Check it before trading: real-money and paper accounts are never told apart by the config alone.
+- **The money-lock is bound to the real account, not the label.** Before sending, the guard verifies IBKR's `isPaper` and the logged-in account and **fails closed** if the configured `IBKR_ACCOUNT_ID` doesn't match, if a real-money account isn't armed with `TRADING_ALLOW_LIVE=true`, or if `IBKR_TRADING_MODE` disagrees with reality — so a mislabelled setup can't quietly trade real money.
+- **No accidental shorts:** a SELL larger than the held position is blocked (unless `TRADING_ALLOW_SHORT=true`); exits are never trapped. **No inverted stops:** a stop already on the wrong side of the market (it would fire instantly) is rejected.
 - **Buys** above `MAX_ORDER_VALUE` are rejected (it's a spend cap; exits — sells, closes, stop-losses — aren't value-gated, so a large position can always be closed or protected).
 - Orders only during regular trading hours (RTH), accounting for **NYSE holidays** (via the `holidays` lib).
 - CPAPI confirmation warnings are auto-accepted only through an allow-list; an unknown warning **blocks** the order.

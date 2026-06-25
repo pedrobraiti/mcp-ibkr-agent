@@ -150,7 +150,8 @@ class CpapiBroker:
         """Live orders whose ``order_ref`` (the cOID we sent) is in ``coids``, as acks."""
         wanted = set(coids)
         try:
-            data = await self._client.get("/iserver/account/orders")
+            # Warmup: the 1st call instantiates the orders endpoint, the 2nd returns data.
+            await self._client.get("/iserver/account/orders")
             data = await self._client.get("/iserver/account/orders")
         except CpapiError:
             return []

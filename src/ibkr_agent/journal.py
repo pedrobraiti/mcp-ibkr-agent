@@ -9,12 +9,15 @@ duplicate-order guard.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .domain.models import OrderRequest, OrderResult, OrderSide, TradingMode
+
+logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,8 +65,21 @@ class TradeJournal:
     def read(self, limit: int = 50) -> list[dict]:
         if not self._path.exists():
             return []
-        lines = self._path.read_text(encoding="utf-8").splitlines()
-        entries = [json.loads(line) for line in lines if line.strip()]
+        entries: list[dict] = []
+        corrupt = 0
+        for line in self._path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                # One bad line must not brick reads — the daily-spend cap and the
+                # duplicate guard depend on this, so skip it and surface the damage.
+                corrupt += 1
+        if corrupt:
+            logger.warning(
+                "Skipped %d corrupt line(s) in the trade journal %s", corrupt, self._path
+            )
         return entries[-limit:] if limit else entries
 
     def spent_today(self) -> Decimal:

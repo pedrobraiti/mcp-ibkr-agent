@@ -10,6 +10,23 @@ versioning follows [SemVer](https://semver.org/).
   straight from IBKR's `isPaper` — the ground truth, independent of the cosmetic
   `IBKR_TRADING_MODE` label. A LIVE account also returns an explicit `warning`, so the
   agent can never mistake a real-money account for paper.
+- **The safety guard now binds the money-lock to the real account, not the label.**
+  Before sending, `GuardedBroker` checks IBKR's `isPaper` and the logged-in account id
+  and **fails closed** when: the configured `IBKR_ACCOUNT_ID` ≠ the logged-in account; a
+  LIVE (real-money) account isn't armed with `TRADING_ALLOW_LIVE=true`; or the
+  `IBKR_TRADING_MODE` label disagrees with reality. A mislabelled setup can no longer
+  quietly move real money.
+- **Naked-short guard:** a SELL larger than the held position is blocked (it would open a
+  short) unless `TRADING_ALLOW_SHORT=true`. Exits are never trapped — if holdings can't be
+  read, the check is skipped.
+- **Inverted-stop guard:** a STOP already on the wrong side of the market (a SELL stop
+  at/above, or a BUY stop at/below, the current price) is rejected — it would trigger
+  instantly, almost always a fat-finger.
+
+### Changed
+- **Trade journal reads survive a corrupt line** (skipped and logged) instead of raising —
+  a single bad line no longer bricks the daily-spend cap, the duplicate guard, or trading
+  itself. Journaling failures are now logged rather than silently swallowed.
 
 ### Docs
 - Troubleshoot `ERR_CONNECTION_REFUSED` (the gateway simply isn't running) distinctly

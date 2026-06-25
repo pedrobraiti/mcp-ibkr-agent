@@ -45,6 +45,21 @@ def test_spent_today_counts_only_placed_buys(tmp_path):
     assert journal.spent_today() == Decimal("50")
 
 
+def test_read_skips_corrupt_lines_instead_of_crashing(tmp_path):
+    # A single malformed line must not brick reads — otherwise the daily-spend cap and
+    # duplicate guard (which read the whole journal) would block ALL trading.
+    path = tmp_path / "trades.jsonl"
+    journal = TradeJournal(path)
+    journal.record(request=OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("30")),
+                   mode=TradingMode.LIVE, dry_run=False, notional=Decimal("30"), result=PLACED)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("{ this is not valid json\n")
+
+    rows = journal.read(limit=0)
+    assert len(rows) == 1
+    assert journal.spent_today() == Decimal("30")
+
+
 def test_has_recent_duplicate(tmp_path):
     journal = TradeJournal(tmp_path / "trades.jsonl")
     request = OrderRequest(symbol="AAPL", side=OrderSide.BUY, cash_qty=Decimal("10"))

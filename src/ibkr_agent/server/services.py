@@ -60,6 +60,9 @@ def build_services(settings: Settings | None = None) -> Services:
         duplicate_window_seconds=settings.duplicate_window_seconds,
         symbol_allowlist=_symbols(settings.symbol_allowlist),
         symbol_denylist=_symbols(settings.symbol_denylist),
+        account_info_provider=auth.account_info,
+        configured_account_id=settings.ibkr_account_id,
+        allow_short=settings.trading_allow_short,
     )
     return Services(
         settings=settings,

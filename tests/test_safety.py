@@ -8,6 +8,7 @@ from ibkr_agent.domain.models import (
     OrderResult,
     OrderSide,
     OrderStatus,
+    Position,
     Quote,
     TradingMode,
 )
@@ -44,8 +45,9 @@ class FakeBroker:
 
 
 class FakeMarketData:
-    def __init__(self, price: Decimal | None):
+    def __init__(self, price: Decimal | None, *, held: Decimal = Decimal("0")):
         self._price = price
+        self._held = held
 
     async def resolve_conid(self, symbol: str) -> int | None:
         return 1
@@ -57,7 +59,9 @@ class FakeMarketData:
         raise NotImplementedError
 
     async def get_positions(self):
-        return []
+        if self._held == 0:
+            return []
+        return [Position(conid=1, symbol="AAPL", quantity=self._held)]
 
 
 def _guarded(broker, md, **kw):
@@ -110,7 +114,7 @@ async def test_sell_over_limit_is_allowed():
     # The value cap is a spend limit: it gates BUYS. A SELL/exit larger than the
     # limit must NOT be blocked, or a big position couldn't be closed or protected.
     broker = FakeBroker()
-    guarded = _guarded(broker, FakeMarketData(Decimal("60")))  # 5 * 60 = 300 > 100
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("5")))  # 5*60=300>100
     result = await guarded.place_order(
         OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5)
     )
@@ -122,7 +126,7 @@ async def test_stop_loss_over_limit_is_allowed():
     from ibkr_agent.domain.models import OrderType
 
     broker = FakeBroker()
-    guarded = _guarded(broker, FakeMarketData(Decimal("60")))  # 5 * 60 = 300 > 100
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("5")))  # 5*60=300>100
     result = await guarded.place_order(
         OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=5,
                      order_type=OrderType.STOP, stop_price=Decimal("55"))
@@ -206,3 +210,81 @@ async def test_symbol_allowlist_blocks_others_and_allows_listed():
         await guarded.place_order(_buy("MSFT", "10"))
     result = await guarded.place_order(_buy("AAPL", "10"))
     assert result.order_id == "real-1"
+
+
+def _account(account_id: str, is_paper: bool):
+    async def provider() -> dict:
+        return {"account_id": account_id, "is_paper": is_paper,
+                "account_type": "PAPER" if is_paper else "LIVE"}
+    return provider
+
+
+async def test_real_account_blocked_without_allow_live():
+    # Ground truth wins over the label: a real account with allow_live off is refused
+    # even though the config says paper.
+    guarded = _guarded(
+        FakeBroker(), FakeMarketData(Decimal("10")),
+        account_info_provider=_account("U1", is_paper=False),
+        configured_account_id="U1", mode=TradingMode.PAPER, allow_live=False,
+    )
+    with pytest.raises(SafetyError, match="LIVE account detected"):
+        await guarded.place_order(_buy("AAPL", "10"))
+
+
+async def test_real_account_blocked_when_label_says_paper():
+    # allow_live is on, but the label still disagrees with the real account → refuse.
+    guarded = _guarded(
+        FakeBroker(), FakeMarketData(Decimal("10")),
+        account_info_provider=_account("U1", is_paper=False),
+        configured_account_id="U1", mode=TradingMode.PAPER, allow_live=True,
+    )
+    with pytest.raises(SafetyError, match="disagrees with reality"):
+        await guarded.place_order(_buy("AAPL", "10"))
+
+
+async def test_real_account_allowed_when_armed_and_consistent():
+    broker = FakeBroker()
+    guarded = _guarded(
+        broker, FakeMarketData(Decimal("10")),
+        account_info_provider=_account("U1", is_paper=False),
+        configured_account_id="U1", mode=TradingMode.LIVE, allow_live=True,
+    )
+    result = await guarded.place_order(_buy("AAPL", "10"))
+    assert result.order_id == "real-1"
+
+
+async def test_account_id_mismatch_blocked():
+    guarded = _guarded(
+        FakeBroker(), FakeMarketData(Decimal("10")),
+        account_info_provider=_account("U999", is_paper=True),
+        configured_account_id="DU1",
+    )
+    with pytest.raises(SafetyError, match="Account mismatch"):
+        await guarded.place_order(_buy("AAPL", "10"))
+
+
+async def test_naked_short_blocked_and_allowed_with_flag():
+    # Selling more than held opens a short → blocked by default.
+    guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10"), held=Decimal("2")))
+    with pytest.raises(SafetyError, match="open a short"):
+        await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=3))
+
+    broker = FakeBroker()
+    allowed = _guarded(broker, FakeMarketData(Decimal("10"), held=Decimal("2")),
+                       allow_short=True)
+    result = await allowed.place_order(
+        OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=3)
+    )
+    assert result.order_id == "real-1"
+
+
+async def test_inverted_stop_blocked():
+    from ibkr_agent.domain.models import OrderType
+
+    # SELL stop AT/ABOVE the market (last=50) would fire instantly — fat-finger.
+    guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("50"), held=Decimal("5")))
+    with pytest.raises(SafetyError, match="trigger immediately"):
+        await guarded.place_order(
+            OrderRequest(symbol="AAPL", side=OrderSide.SELL, quantity=1,
+                         order_type=OrderType.STOP, stop_price=Decimal("55"))
+        )

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Safety
     trading_allow_live: bool = False
     trading_dry_run: bool = True
+    # Allow a SELL larger than the held position (i.e. opening a short). Off by default.
+    trading_allow_short: bool = False
     max_order_value: Decimal = Decimal("100")
     # Cumulative spend across all buys in a day (market tz). None = no daily cap.
     max_daily_value: Decimal | None = None

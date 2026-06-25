@@ -15,7 +15,8 @@ is provided.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 from ..domain.models import (
@@ -25,10 +26,13 @@ from ..domain.models import (
     OrderResult,
     OrderSide,
     OrderStatus,
+    OrderType,
     TradingMode,
 )
 from ..domain.ports import BrokerPort, MarketDataPort
 from ..journal import TradeJournal
+
+logger = logging.getLogger(__name__)
 
 
 class SafetyError(Exception):
@@ -54,6 +58,9 @@ class GuardedBroker:
         duplicate_window_seconds: float = 0.0,
         symbol_allowlist: frozenset[str] = frozenset(),
         symbol_denylist: frozenset[str] = frozenset(),
+        account_info_provider: Callable[[], Awaitable[dict]] | None = None,
+        configured_account_id: str = "",
+        allow_short: bool = False,
     ):
         self._inner = inner
         self._market_data = market_data
@@ -68,6 +75,9 @@ class GuardedBroker:
         self._duplicate_window_seconds = duplicate_window_seconds
         self._symbol_allowlist = symbol_allowlist
         self._symbol_denylist = symbol_denylist
+        self._account_info_provider = account_info_provider
+        self._configured_account_id = configured_account_id
+        self._allow_short = allow_short
 
     async def place_order(self, request: OrderRequest) -> OrderResult:
         notional: Decimal | None = None
@@ -118,6 +128,12 @@ class GuardedBroker:
 
     async def _run_guards(self, request: OrderRequest) -> Decimal | None:
         """Apply every safety lock and return the estimated notional. Raises on violation."""
+        # Ground-truth account check FIRST: bind the real-money lock to IBKR's isPaper
+        # (and the configured account to the logged-in one), not just the config label.
+        await self._verify_account()
+
+        # Defense-in-depth: the label-level lock still applies even if the account
+        # check above is unavailable (no provider wired).
         if self._mode is TradingMode.LIVE and not self._allow_live:
             raise SafetyError(
                 "LIVE mode blocked: set TRADING_ALLOW_LIVE=true to trade with real money."
@@ -148,6 +164,9 @@ class GuardedBroker:
                 f"(US${self._max_order_value})."
             )
 
+        await self._check_no_naked_short(request)
+        await self._check_stop_not_inverted(request)
+
         if self._journal is not None and self._journal.has_recent_duplicate(
             request, self._duplicate_window_seconds
         ):
@@ -159,6 +178,105 @@ class GuardedBroker:
 
         self._check_daily_limit(request, notional)
         return notional
+
+    async def _verify_account(self) -> None:
+        """Make the real account — not the config label — authoritative for money risk.
+
+        IBKR's ``isPaper`` is the ground truth. We refuse to trade when the configured
+        account doesn't match the logged-in one, when a LIVE (real-money) account isn't
+        explicitly armed, or when the ``IBKR_TRADING_MODE`` label disagrees with reality.
+        Every mismatch fails CLOSED, so a mislabelled setup can never quietly move real
+        money. Skipped only when no account provider is wired (e.g. unit tests).
+        """
+        if self._account_info_provider is None:
+            return
+        info = await self._account_info_provider()
+        account_id = info.get("account_id")
+        is_paper = info.get("is_paper")
+
+        if (
+            self._configured_account_id
+            and account_id
+            and account_id != self._configured_account_id
+        ):
+            raise SafetyError(
+                f"Account mismatch: configured IBKR_ACCOUNT_ID={self._configured_account_id} "
+                f"but the gateway is logged into {account_id}. Refusing to trade until they "
+                "match — fix .env or log in to the intended account."
+            )
+
+        if is_paper is False:  # a real-money account
+            if not self._allow_live:
+                raise SafetyError(
+                    "LIVE account detected (real money) but TRADING_ALLOW_LIVE is not true. "
+                    "Refusing to send the order. Only set TRADING_ALLOW_LIVE=true if you "
+                    "really mean to trade with real money."
+                )
+            if self._mode is not TradingMode.LIVE:
+                raise SafetyError(
+                    "Config disagrees with reality: the gateway is logged into a LIVE "
+                    f"(real-money) account but IBKR_TRADING_MODE={self._mode.value}. Set "
+                    "IBKR_TRADING_MODE=live so the config matches, then retry."
+                )
+        elif is_paper is True and self._mode is TradingMode.LIVE:
+            raise SafetyError(
+                "Config disagrees with reality: IBKR_TRADING_MODE=live but the gateway is "
+                "logged into a PAPER account. Set IBKR_TRADING_MODE=paper to match, then retry."
+            )
+
+    async def _check_no_naked_short(self, request: OrderRequest) -> None:
+        """Block a SELL that exceeds the held position (which would open a short).
+
+        Exits must never be trapped, so if holdings can't be read (infra error) the
+        check is skipped rather than blocking. A genuine oversell — quantity above the
+        confirmed long position — is rejected unless shorting is explicitly allowed.
+        """
+        if self._allow_short or request.side is not OrderSide.SELL or request.quantity is None:
+            return
+        try:
+            conid = await self._market_data.resolve_conid(request.symbol)
+            positions = await self._market_data.get_positions()
+        except Exception:  # noqa: BLE001 - can't verify holdings; never trap an exit
+            return
+        held = sum(
+            (p.quantity for p in positions if p.conid == conid and p.quantity > 0),
+            Decimal(0),
+        )
+        if request.quantity > held:
+            raise SafetyError(
+                f"Sell of {request.quantity} {request.symbol.upper()} exceeds the held "
+                f"position ({held}) — this would open a short. Reduce the quantity (or use "
+                "close_position to exit fully), or set TRADING_ALLOW_SHORT=true to allow it."
+            )
+
+    async def _check_stop_not_inverted(self, request: OrderRequest) -> None:
+        """Reject a stop already on the wrong side of the market (it would fire instantly).
+
+        A real stop-loss sits BELOW the market for a SELL and ABOVE it for a BUY; the
+        inverse is almost always a fat-finger. Skipped if no price is available.
+        """
+        if request.order_type not in (OrderType.STOP, OrderType.STOP_LIMIT):
+            return
+        if request.stop_price is None:
+            return
+        try:
+            quote = await self._market_data.get_quote(request.symbol)
+        except Exception:  # noqa: BLE001 - no price to sanity-check against; allow it
+            return
+        last = quote.last_price if quote else None
+        if last is None:
+            return
+        if request.side is OrderSide.SELL and request.stop_price >= last:
+            raise SafetyError(
+                f"SELL stop at {request.stop_price} is at/above the current price ({last}); "
+                "it would trigger immediately. A stop-loss on a long position sits BELOW "
+                "the market — check the price."
+            )
+        if request.side is OrderSide.BUY and request.stop_price <= last:
+            raise SafetyError(
+                f"BUY stop at {request.stop_price} is at/below the current price ({last}); "
+                "it would trigger immediately. A buy-stop sits ABOVE the market — check the price."
+            )
 
     async def preview_order(self, request: OrderRequest) -> OrderPreview:
         # Read-only estimate (margin/commission/warnings); no guard needed.
@@ -206,7 +324,7 @@ class GuardedBroker:
                 error=error,
             )
         except Exception:  # noqa: BLE001 - journaling must never break trading
-            pass
+            logger.warning("Failed to journal an order attempt", exc_info=True)
 
     async def _notional(self, request: OrderRequest) -> Decimal | None:
         """Estimated order value in US$. For cashQty it's direct; for quantity it uses the quote."""
