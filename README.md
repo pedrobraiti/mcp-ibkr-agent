@@ -141,6 +141,8 @@ Both `/tickle` every `TICKLE_INTERVAL_SECONDS` and, when the session drops, emit
 
 ### Login troubleshooting
 
+**`https://localhost:5000` won't load at all** (`ERR_CONNECTION_REFUSED` / "connection refused") — the login page never even appears? That page only exists while the gateway is running, so this means the **gateway isn't up**. Start it (`bin\run.bat root\conf.yaml` on Windows, `bin/run.sh root/conf.yaml` on Linux/macOS) and leave that window open — if it closes, the gateway stops and the port refuses connections again. Only once the page loads do the login steps below apply.
+
 If you log in and approve 2FA but **nothing happens** — the page just sits there and the API stays `authenticated:false`/`connected:false` (sometimes `ssodh/init` returns HTTP 500 / `no bridge`):
 
 - **Restart the gateway clean and log in fresh** — this is what fixes it almost every time. Kill the Java process, start it again, reload `https://localhost:5000`, and log in. An incognito/private tab also helps (stale cookies).
