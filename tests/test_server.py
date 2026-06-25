@@ -54,7 +54,22 @@ def test_build_services_wires_without_network():
 
 
 class _FakeAuth:
+    def __init__(self, *, is_paper: bool = True, authenticated: bool = True):
+        self._is_paper = is_paper
+        self._authenticated = authenticated
+
     async def ensure_session(self) -> None: ...
+
+    async def status(self) -> dict:
+        return {"authenticated": self._authenticated, "connected": True, "competing": False}
+
+    async def account_info(self) -> dict:
+        account_id = "DU1" if self._is_paper else "U1"
+        return {
+            "account_id": account_id,
+            "is_paper": self._is_paper,
+            "account_type": "PAPER" if self._is_paper else "LIVE",
+        }
 
 
 class _FakeMarketData:
@@ -133,6 +148,7 @@ async def test_smoke_buy_dry_run_and_portfolio_through_tools(tmp_path, monkeypat
     snapshot = await app.portfolio()
     assert snapshot["ok"] is True
     assert snapshot["data"]["unrealized_pnl"] == "2"
+    assert snapshot["data"]["account_type"] == "PAPER"
 
     history = await app.trade_history()
     assert history["ok"] is True
@@ -247,6 +263,41 @@ async def test_get_quotes_batch(monkeypatch):
     out = await app.get_quotes(["aapl", "msft"])
     assert out["ok"] is True
     assert {q["symbol"] for q in out["data"]} == {"AAPL", "MSFT"}
+
+
+def _services_with_auth(auth):
+    return Services(
+        settings=Settings(ibkr_account_id="DU1"), client=None, auth=auth,
+        market_data=_FakeMarketData(), broker=None,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+
+
+async def test_session_status_flags_live_account(monkeypatch):
+    monkeypatch.setattr(app, "_services", _services_with_auth(_FakeAuth(is_paper=False)))
+    out = await app.session_status()
+    assert out["ok"] is True
+    assert out["data"]["account_type"] == "LIVE"
+    assert out["data"]["is_paper"] is False
+    assert "REAL money" in out["data"]["warning"]
+
+
+async def test_session_status_marks_paper_without_warning(monkeypatch):
+    monkeypatch.setattr(app, "_services", _services_with_auth(_FakeAuth(is_paper=True)))
+    out = await app.session_status()
+    assert out["ok"] is True
+    assert out["data"]["account_type"] == "PAPER"
+    assert "warning" not in out["data"]
+
+
+async def test_session_status_skips_account_lookup_when_unauthenticated(monkeypatch):
+    monkeypatch.setattr(
+        app, "_services", _services_with_auth(_FakeAuth(authenticated=False))
+    )
+    out = await app.session_status()
+    assert out["ok"] is True
+    assert out["data"]["authenticated"] is False
+    assert "account_type" not in out["data"]
 
 
 async def test_wait_for_fill_returns_on_terminal_status(monkeypatch):

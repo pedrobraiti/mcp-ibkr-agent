@@ -97,7 +97,11 @@ These are **all 19 MCP tools** you have once the `ibkr` server is connected — 
 capability surface. Every tool returns an `{"ok": bool, "data"/"error": ...}` envelope.
 
 **Session & market**
-- `session_status` — is the gateway authenticated/connected/competing.
+- `session_status` — is the gateway authenticated/connected/competing, **and which
+  account is live**: it returns `account_type` (`"LIVE"`/`"PAPER"`) from IBKR's
+  `isPaper` (a LIVE account also returns a `warning`). This is the ground truth — the
+  `IBKR_TRADING_MODE` label can disagree. Check it before trading so you never mistake
+  a real-money account for paper. `portfolio` carries the same `account_type`.
 - `market_status` — is the US market open (RTH) right now.
 
 **Quotes & account (read-only)**
@@ -147,6 +151,9 @@ Valet ships safe by default and you must keep it that way:
 - Orders are blocked outside regular trading hours, above `MAX_ORDER_VALUE`, and when an
   unknown confirmation warning appears.
 - Before a real order, confirm the symbol, side, and amount back to the user.
+- **Never assume paper vs. live from the config or defaults.** Call `session_status`
+  and read `account_type` — if it's `LIVE`, you are moving real money; say so plainly
+  to the user. Paper account ids start with `DU`, live ones with `U`.
 
 ---
 

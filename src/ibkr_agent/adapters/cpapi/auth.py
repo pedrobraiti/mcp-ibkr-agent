@@ -20,6 +20,28 @@ class GatewayAuth:
         data = await self._client.post("/iserver/auth/status")
         return data if isinstance(data, dict) else {}
 
+    async def account_info(self) -> dict:
+        """Ground truth about the logged-in account, straight from IBKR.
+
+        ``/iserver/accounts`` reports ``isPaper`` — the only reliable signal of
+        whether real money is at stake. The configured ``IBKR_TRADING_MODE`` is just
+        a label and can disagree with the account the gateway is actually logged
+        into, so never trust it for this. Returns ``account_id``, ``is_paper`` and a
+        human ``account_type`` ("LIVE"/"PAPER"). Falls back to the account-id prefix
+        (paper ids start with ``DU``) only if the API omits ``isPaper``.
+        """
+        data = await self._client.get("/iserver/accounts")
+        data = data if isinstance(data, dict) else {}
+        account_id = data.get("selectedAccount")
+        is_paper = data.get("isPaper")
+        if is_paper is None and isinstance(account_id, str) and account_id:
+            is_paper = not account_id.upper().startswith("U")
+        return {
+            "account_id": account_id,
+            "is_paper": is_paper,
+            "account_type": None if is_paper is None else ("PAPER" if is_paper else "LIVE"),
+        }
+
     async def is_authenticated(self) -> bool:
         return bool((await self.status()).get("authenticated"))
 

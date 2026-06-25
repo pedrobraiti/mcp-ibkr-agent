@@ -3,6 +3,19 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`session_status` and `portfolio` report `account_type`** (`"LIVE"`/`"PAPER"`)
+  straight from IBKR's `isPaper` — the ground truth, independent of the cosmetic
+  `IBKR_TRADING_MODE` label. A LIVE account also returns an explicit `warning`, so the
+  agent can never mistake a real-money account for paper.
+
+### Docs
+- Troubleshoot `ERR_CONNECTION_REFUSED` (the gateway simply isn't running) distinctly
+  from the "logged in but nothing happens" case.
+- Clarify that `IBKR_TRADING_MODE` is a label, not the account selector.
+
 ## [0.3.0] - 2026-06-23
 
 ### Added

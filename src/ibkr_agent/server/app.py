@@ -73,9 +73,25 @@ def _err(exc: Exception) -> dict:
 
 @mcp.tool()
 async def session_status() -> dict:
-    """Status of the session with the IBKR gateway (authenticated/connected/competing)."""
+    """Session status AND which account is live: authenticated/connected/competing plus
+    `account_id`, `account_type` ("LIVE"/"PAPER") and `is_paper`.
+
+    `account_type` is the ground truth from IBKR (`isPaper`), NOT the configured
+    `IBKR_TRADING_MODE` label — always check it before trading so you never mistake a
+    real-money account for paper. When the account is LIVE a `warning` is included.
+    """
+    svc = services()
     try:
-        return _ok(await services().auth.status())
+        status = await svc.auth.status()
+        if status.get("authenticated"):
+            info = await svc.auth.account_info()
+            status.update(info)
+            if info.get("is_paper") is False:
+                status["warning"] = (
+                    "LIVE account — orders placed here move REAL money. "
+                    "Confirm symbol, side and amount with the user before sending."
+                )
+        return _ok(status)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -140,11 +156,13 @@ async def portfolio() -> dict:
     svc = services()
     try:
         await svc.auth.ensure_session()
+        info = await svc.auth.account_info()
         summary = await svc.market_data.get_account_summary()
         rows = await svc.market_data.get_positions()
         total_pnl = sum((p.unrealized_pnl or Decimal(0) for p in rows), Decimal(0))
         return _ok(
             {
+                "account_type": info.get("account_type"),
                 "summary": summary.model_dump(mode="json"),
                 "positions": [p.model_dump(mode="json") for p in rows],
                 "unrealized_pnl": str(total_pnl),

@@ -81,7 +81,7 @@ See `.env.example`. Main keys:
 |---|---|---|
 | `IBKR_API_BASE_URL` | `https://localhost:5000/v1/api` | Client Portal Gateway endpoint |
 | `IBKR_ACCOUNT_ID` | — | Account id (e.g. `DU1234567` in paper) |
-| `IBKR_TRADING_MODE` | `paper` | `paper` or `live` |
+| `IBKR_TRADING_MODE` | `paper` | A **label only** — it does *not* pick the account. Whether real money is at stake depends on which account you log the gateway into; the ground truth is IBKR's `isPaper` (see `account_type` from `session_status`). |
 | `TRADING_ALLOW_LIVE` | `false` | Hard lock: `live` only trades if `true` |
 | `TRADING_DRY_RUN` | `true` | Validates but **does not send** orders |
 | `MAX_ORDER_VALUE` | `100.0` | Per-order limit (USD) |
@@ -197,6 +197,7 @@ Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an 
 
 - **paper** by default; **live** blocked unless `TRADING_ALLOW_LIVE=true`.
 - **dry-run** on by default (no real order is sent).
+- **Know which account is live.** `session_status` and `portfolio` report `account_type` (`"LIVE"`/`"PAPER"`) straight from IBKR's `isPaper` — not the `IBKR_TRADING_MODE` label, which can disagree with the account the gateway is actually logged into. A LIVE account also returns an explicit `warning`. Check it before trading: real-money and paper accounts are never told apart by the config alone.
 - **Buys** above `MAX_ORDER_VALUE` are rejected (it's a spend cap; exits — sells, closes, stop-losses — aren't value-gated, so a large position can always be closed or protected).
 - Orders only during regular trading hours (RTH), accounting for **NYSE holidays** (via the `holidays` lib).
 - CPAPI confirmation warnings are auto-accepted only through an allow-list; an unknown warning **blocks** the order.
