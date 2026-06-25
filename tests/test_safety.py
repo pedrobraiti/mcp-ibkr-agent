@@ -431,6 +431,17 @@ async def test_repeated_cover_of_the_same_short_is_capped():
         await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
 
 
+async def test_dry_run_cover_does_not_consume_the_allowance():
+    # A validation-only dry-run must not mutate gating state (it would otherwise trap a
+    # later real cover). Two dry-run covers both pass and nothing is reserved.
+    broker = FakeBroker()
+    guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("-5")), dry_run=True)
+    first = await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+    second = await guarded.place_order(OrderRequest(symbol="AAPL", side=OrderSide.BUY, quantity=5))
+    assert first.dry_run is True and second.dry_run is True
+    assert guarded._recent_covers == {}
+
+
 async def test_buying_beyond_the_short_stays_capped():
     # Covering 5 but buying 10 is partly opening → keep it capped.
     broker = FakeBroker()

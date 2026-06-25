@@ -319,7 +319,10 @@ class GuardedBroker:
             self._recent_covers.pop(stale, None)
         if conid in self._recent_covers:
             return False  # already covered this conid recently → cap further buys (fail-safe)
-        self._recent_covers[conid] = now
+        # A dry-run validates without sending, so it must not mutate gating state (it would
+        # otherwise consume the one-cover allowance and trap a later real cover).
+        if not self._dry_run:
+            self._recent_covers[conid] = now
         return True
 
     async def _check_no_naked_short(self, request: OrderRequest) -> None:

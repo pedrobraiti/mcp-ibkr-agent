@@ -289,14 +289,16 @@ async def close_position(symbol: str) -> dict:
             else:
                 _recent_closes.pop(conid, None)  # known no-dispatch (dry-run/rejected) → release
             return _ok(result.model_dump(mode="json"))
-        except Exception:
-            # The order may have landed (e.g. an indeterminate 503) — HOLD the cooldown so a
-            # retry can't double-close; only release if we never even attempted to send.
-            if order_attempted:
-                _recent_closes[conid] = time.monotonic()
-            else:
-                _recent_closes.pop(conid, None)
-            raise
+        finally:
+            # If we left the in-flight sentinel in place, an exception OR a CancelledError
+            # (a BaseException, so it bypasses `except Exception`) aborted us before we
+            # normalized it. Normalize here for EVERY exit path so the sentinel can't leak
+            # forever: hold the cooldown if the order may have landed, else release.
+            if _recent_closes.get(conid) is _INFLIGHT:
+                if order_attempted:
+                    _recent_closes[conid] = time.monotonic()
+                else:
+                    _recent_closes.pop(conid, None)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

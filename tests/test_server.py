@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from ibkr_agent.config import Settings
 from ibkr_agent.domain.models import (
     AccountSummary,
@@ -378,6 +380,39 @@ async def test_close_position_holds_reservation_on_indeterminate(monkeypatch):
     assert second["data"]["closed"] is False  # reservation held → retry backs off
     assert "twice" in second["data"]["reason"]
     assert len(inner.placed) == 1  # only the first attempt was sent
+    app._recent_closes.clear()
+
+
+async def test_close_position_cancelled_does_not_permanently_block(monkeypatch):
+    import asyncio
+    import math
+
+    app._recent_closes.clear()
+
+    class _CancellingInner(_FakeInner):
+        async def place_order(self, request: OrderRequest) -> OrderResult:
+            self.placed.append(request)
+            raise asyncio.CancelledError()
+
+    market_data = _FakeMarketData()
+    broker = GuardedBroker(
+        _CancellingInner(), market_data, mode=TradingMode.PAPER, allow_live=False,
+        dry_run=False, max_order_value=Decimal("1000"), require_market_open=False,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+    svc = Services(settings=Settings(ibkr_account_id="DU1"), client=None, auth=_FakeAuth(),
+                   market_data=market_data, broker=broker, journal=broker._journal)
+    monkeypatch.setattr(app, "_services", svc)
+
+    with pytest.raises(asyncio.CancelledError):
+        await app.close_position("AAPL")
+
+    # The in-flight sentinel was normalized to a FINITE timestamp (not left as inf forever),
+    # and it evicts after the window — so the contract is not permanently blocked.
+    val = app._recent_closes.get(1)
+    assert val is not None and math.isfinite(val)
+    app._evict_stale_closes(val + app._CLOSE_COOLDOWN_SECONDS + 1)
+    assert 1 not in app._recent_closes
     app._recent_closes.clear()
 
 
