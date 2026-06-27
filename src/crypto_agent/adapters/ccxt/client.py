@@ -130,5 +130,9 @@ class CcxtClient:
             )
 
     async def aclose(self) -> None:
-        """Close the underlying aiohttp session (CCXT async exchanges must be closed)."""
+        """Close the underlying aiohttp session (CCXT async exchanges must be closed).
+
+        Note: ccxt/aiohttp may still log a cosmetic "Unclosed client session" line at
+        interpreter shutdown on Windows even after this runs — it's harmless.
+        """
         await self.exchange.close()
