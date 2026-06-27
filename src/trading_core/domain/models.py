@@ -1,12 +1,12 @@
 """Domain models — agnostic to the concrete broker.
 
 Monetary values use ``Decimal`` to avoid floating-point error.
-An order is expressed either by ``quantity`` (number of shares, fractional allowed) OR
-``cash_qty`` (dollar amount) — never both at the same time.
+An order is expressed either by ``quantity`` (units, fractional allowed) OR ``cash_qty``
+(amount in the quote currency) — never both at the same time.
 
-CPAPI note: ``cash_qty`` (cashQty) is only accepted on BUYS. To sell/close a
-fractional position you must use a fractional ``quantity`` (IBKR rejects
-cashQty on sell orders). That is why ``quantity`` is ``Decimal``, not ``int``.
+Buy-by-value (``cash_qty``) is a MARKET-BUY-only mode on both venues (IBKR cashQty;
+crypto ``createMarketBuyOrderWithCost``); to sell/close you must use a fractional
+``quantity``. That is why ``quantity`` is ``Decimal``, not ``int``.
 """
 
 from __future__ import annotations
@@ -63,12 +63,16 @@ class OrderRequest(BaseModel):
         default=None, gt=0, description="Number of shares (fractional allowed)."
     )
     cash_qty: Decimal | None = Field(
-        default=None, gt=0, description="Amount in US$ (fractional via cashQty)."
+        default=None, gt=0, description="Amount in the quote currency (fractional buy-by-value)."
     )
     limit_price: Decimal | None = Field(default=None, gt=0)
     stop_price: Decimal | None = Field(
         default=None, gt=0, description="Trigger price for STOP / STOP_LIMIT orders."
     )
+    trailing_amount: Decimal | None = Field(
+        default=None, gt=0, description="Trail distance for a TRAIL order ($ or %)."
+    )
+    trailing_type: TrailingType = TrailingType.AMOUNT
 
     @field_validator("symbol")
     @classmethod
@@ -76,17 +80,13 @@ class OrderRequest(BaseModel):
         # Strip surrounding whitespace so a padded symbol (" AAPL ") can't slip past the
         # deny/allow-list (which match the symbol) while still resolving to a contract.
         return value.strip()
-    trailing_amount: Decimal | None = Field(
-        default=None, gt=0, description="Trail distance for a TRAIL order ($ or %)."
-    )
-    trailing_type: TrailingType = TrailingType.AMOUNT
 
     @model_validator(mode="after")
     def _validate(self) -> OrderRequest:
         if (self.quantity is None) == (self.cash_qty is None):
             raise ValueError("Provide exactly one of 'quantity' and 'cash_qty'.")
-        # cashQty is simulated by IBKR for MARKET BUYS only — it is rejected on sells and
-        # on limit/stop orders. Enforce it here so a malformed cash order can't be built
+        # Buy-by-value is MARKET-BUY-only on both venues — rejected on sells and on
+        # limit/stop orders. Enforce it here so a malformed cash order can't be built
         # and slip past the side-specific guards (a cash SELL has no quantity, which would
         # otherwise bypass the naked-short check entirely).
         if self.cash_qty is not None and (
@@ -164,11 +164,12 @@ class OrderResult(BaseModel):
 
 
 class OrderPreview(BaseModel):
-    """Estimated impact of an order before it is sent (IBKR whatif).
+    """Estimated impact of an order before it is sent.
 
-    Lets the agent reason about cost and margin before committing money.
-    ``amount`` is the total cash outlay (incl. commission) and ``commission`` the
-    estimated fee. ``margin_change``/``equity_change`` are populated for
+    Lets the agent reason about cost and margin before committing money. Backed by IBKR's
+    ``whatif`` on the IBKR venue; the crypto venue has no exchange preview (its
+    ``preview_order`` raises). ``amount`` is the total cash outlay (incl. commission) and
+    ``commission`` the estimated fee. ``margin_change``/``equity_change`` are populated for
     margin-affecting orders; for fractional cash orders IBKR instead reports the
     available-funds before/after. ``raw`` always carries the full payload.
     """

@@ -1,8 +1,9 @@
 """Configuration for the crypto server, loaded from environment variables / `.env`.
 
-Reuses the shared safety gates (``TRADING_DRY_RUN``, ``MAX_ORDER_VALUE``, ...) and adds
-the ``CRYPTO_*`` keys. The live gate is venue-specific (``CRYPTO_ALLOW_LIVE``) so arming
-the IBKR server does NOT arm the crypto server.
+Adds the ``CRYPTO_*`` keys. The live and dry-run gates are venue-specific
+(``CRYPTO_ALLOW_LIVE`` / ``CRYPTO_DRY_RUN``) so arming the IBKR server does NOT arm the
+crypto server; only the policy limits (``MAX_ORDER_VALUE``, ``MAX_DAILY_VALUE``,
+``DUPLICATE_WINDOW_SECONDS``) are shared across both venues.
 """
 
 from __future__ import annotations
@@ -63,7 +64,6 @@ class CryptoSettings(BaseSettings):
     # Separate audit log so crypto and IBKR caps/duplicate-guards don't mix venues.
     crypto_trade_journal_path: str = "logs/crypto_trades.jsonl"
 
-    request_timeout_seconds: float = 15.0
     log_level: str = "INFO"
 
     @property

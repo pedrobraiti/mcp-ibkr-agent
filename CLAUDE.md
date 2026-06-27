@@ -6,9 +6,11 @@ asks you to help them set up or use Valet, follow this guide. Your role is twofo
 they ask for**. The trading *decision* (what/when) is always the user's; Valet is just
 the reliable execution plumbing.
 
-Valet is an MCP server that trades on **Interactive Brokers**, including **fractional
-shares by dollar amount**. See `README.md` for the full picture and `DECISIONS.md` for
-the reasoning behind the design.
+Valet is a **monorepo of two MCP servers** over one shared safety core (`trading_core`):
+`ibkr` — trades on **Interactive Brokers** (incl. **fractional shares by dollar amount**) —
+and `crypto` — spot on **crypto exchanges** via CCXT. See `README.md` for the full picture
+and `DECISIONS.md` for the reasoning behind the design. (The setup section below covers the
+IBKR server; the crypto server has its own section further down.)
 
 ---
 

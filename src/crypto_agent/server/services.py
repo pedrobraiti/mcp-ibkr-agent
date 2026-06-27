@@ -17,6 +17,22 @@ from ..adapters.ccxt import CcxtBroker, CcxtClient, CcxtMarketData
 from ..config import CryptoSettings, get_settings
 
 
+async def _probe_account_info(client: CcxtClient, settings: CryptoSettings) -> dict:
+    """Probe the keys (raises if they don't authenticate) and report venue identity.
+
+    ``is_paper`` reflects sandbox vs live — crypto has no independent isPaper ground truth
+    like IBKR, so it is derived from the configured mode. Shared by the guard's account
+    provider and ``session_status`` so both verify the exact same thing.
+    """
+    await client.exchange.fetch_balance()  # raises if the keys don't authenticate
+    is_paper = settings.is_sandbox
+    return {
+        "account_id": settings.crypto_exchange,
+        "is_paper": is_paper,
+        "account_type": "PAPER" if is_paper else "LIVE",
+    }
+
+
 @dataclass
 class Services:
     settings: CryptoSettings
@@ -27,18 +43,8 @@ class Services:
     capabilities: Capabilities
 
     async def account_info(self) -> dict:
-        """Probe the keys and report identity for the guard / session_status.
-
-        ``is_paper`` reflects sandbox vs live (crypto has no independent isPaper ground
-        truth like IBKR), so the guard's mode/label consistency checks still apply.
-        """
-        await self.client.exchange.fetch_balance()  # raises if the keys don't authenticate
-        is_paper = self.settings.is_sandbox
-        return {
-            "account_id": self.settings.crypto_exchange,
-            "is_paper": is_paper,
-            "account_type": "PAPER" if is_paper else "LIVE",
-        }
+        """Identity for ``session_status`` — the same probe the guard runs before an order."""
+        return await _probe_account_info(self.client, self.settings)
 
 
 def _symbols(raw: str) -> frozenset[str]:
@@ -56,21 +62,11 @@ def build_services(settings: CryptoSettings | None = None) -> Services:
         quote_currency=settings.crypto_quote_ccy,
     )
     market_data = CcxtMarketData(client)
-    journal = TradeJournal(settings.crypto_trade_journal_path)
+    # 24/7 venue → account the daily-spend cap by UTC days, not the IBKR NY trading day.
+    journal = TradeJournal(settings.crypto_trade_journal_path, market_timezone="UTC")
     capabilities = crypto_capabilities(
         settings.crypto_quote_ccy, allow_margin=settings.crypto_allow_margin
     )
-
-    # The guard needs an account-info provider that probes the live keys; it captures the
-    # client/settings, so it's defined here (no back-reference into Services needed).
-    async def account_info_provider() -> dict:
-        await client.exchange.fetch_balance()  # raises if the keys don't authenticate
-        is_paper = settings.is_sandbox
-        return {
-            "account_id": settings.crypto_exchange,
-            "is_paper": is_paper,
-            "account_type": "PAPER" if is_paper else "LIVE",
-        }
 
     guarded = GuardedBroker(
         CcxtBroker(client),
@@ -86,9 +82,9 @@ def build_services(settings: CryptoSettings | None = None) -> Services:
         duplicate_window_seconds=settings.duplicate_window_seconds,
         symbol_allowlist=_symbols(settings.symbol_allowlist),
         symbol_denylist=_symbols(settings.symbol_denylist),
-        account_info_provider=account_info_provider,
+        account_info_provider=lambda: _probe_account_info(client, settings),
         configured_account_id="",  # no fixed account id to match on a crypto exchange
-        allow_short=settings.crypto_allow_margin,  # spot-only ⇒ no shorting by default
+        allow_short=capabilities.supports_shorting,  # spot-only ⇒ no shorting by default
         venue=f"the {settings.crypto_exchange} exchange",
         live_env_var="CRYPTO_ALLOW_LIVE",
         mode_env_var="CRYPTO_TRADING_MODE",

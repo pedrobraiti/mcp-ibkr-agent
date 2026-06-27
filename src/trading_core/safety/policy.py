@@ -36,9 +36,10 @@ from ..journal import TradeJournal
 
 logger = logging.getLogger(__name__)
 
-# After a covering BUY is waved past the value cap, IBKR's portfolio can keep showing the
-# old (un-reduced) short for tens of seconds. Without memory, a split or repeated "cover"
-# against that stale short would each pass and build an arbitrarily large LONG past the cap.
+# After a covering BUY is waved past the value cap, the venue's holdings can keep showing the
+# old (un-reduced) short for tens of seconds (IBKR portfolio lag; exchange settlement). Without
+# memory, a split or repeated "cover" against that stale short would each pass and build an
+# arbitrarily large LONG past the cap.
 # So a symbol gets one uncapped cover per this window; further buys are capped until the
 # position settles. The reservation only ever persists (fail-safe: it caps, never uncaps).
 _COVER_COOLDOWN_SECONDS = 45.0
@@ -172,8 +173,9 @@ class GuardedBroker:
 
     async def _run_guards(self, request: OrderRequest) -> Decimal | None:
         """Apply every safety lock and return the estimated notional. Raises on violation."""
-        # Ground-truth account check FIRST: bind the real-money lock to IBKR's isPaper
-        # (and the configured account to the logged-in one), not just the config label.
+        # Ground-truth account check FIRST: bind the real-money lock to the venue's reported
+        # paper/live status (and the configured account to the logged-in one), not just the
+        # config label.
         await self._verify_account()
 
         # Defense-in-depth: the label-level lock still applies even if the account

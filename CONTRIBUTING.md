@@ -28,7 +28,9 @@ pip install -e ".[dev]"
 
 ## Architecture
 
-Hexagonal (ports & adapters): swapping/extending the broker or the data source
-lives in `adapters/` + `server/services.py`; the domain (`domain/`) does not know
-about IBKR. See the [README](README.md) for the overview and
+Hexagonal (ports & adapters), as a monorepo: the shared `trading_core/` (domain models,
+ports, journal, the generic `GuardedBroker`, per-venue `Capabilities`) knows about no
+venue; each venue is a thin adapter package (`ibkr_agent/`, `crypto_agent/`) wiring its
+adapter + MCP server in its own `server/services.py`. Adding a venue is a new `*_agent`
+package, not a change to the core. See the [README](README.md) for the overview and
 [DECISIONS.md](DECISIONS.md) for the rationale.

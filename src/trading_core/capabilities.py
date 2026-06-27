@@ -1,13 +1,12 @@
 """Per-venue capability contract.
 
-The generic ``GuardedBroker`` must stay agnostic to any single broker: instead of
-``if venue == "ibkr"`` it reads flags off a ``Capabilities`` object the adapter declares.
-This is what lets the same safety layer wrap Interactive Brokers (RTH, no sell-by-value)
-and a crypto exchange (24/7, spot-only) without branching on the venue.
-
-The composition root (each server's ``services.py``) builds the venue's ``Capabilities``
-and maps it to the guard's configuration (e.g. ``market_hours_model`` → whether to require
-an open market). Keeping it a small frozen dataclass makes the contract explicit and testable.
+So the generic ``GuardedBroker`` never branches on the venue, each adapter declares a
+``Capabilities`` object and the **composition root** (each server's ``services.py``) reads
+it to configure the guard — e.g. ``market_hours_model`` → ``require_market_open``,
+``supports_shorting`` → ``allow_short``. The same safety layer then wraps Interactive
+Brokers (RTH, no sell-by-value) and a crypto exchange (24/7, spot-only) with no
+``if venue == "ibkr"`` anywhere. The remaining flags document the venue's contract for
+the agent/skill. Keeping it a small frozen dataclass makes the contract explicit and testable.
 """
 
 from __future__ import annotations

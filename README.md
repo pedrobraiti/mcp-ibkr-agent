@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Valet — an MCP server for Interactive Brokers" width="600">
+  <img src="assets/banner.png" alt="Valet — an agentic-trading MCP for Interactive Brokers and crypto" width="600">
 </p>
 
 <p align="center">
@@ -41,13 +41,16 @@ flowchart LR
 ```
 
 ```
-domain/      models (OrderRequest with quantity OR cash_qty) and ports (Broker/MarketData/Auth)
-adapters/    cpapi/ — implementation over the IBKR Client Portal API (REST)
-safety/      GuardedBroker — guards: live lock, dry-run, value limit, trading hours
-server/      MCP server (FastMCP) + dependency composition
+src/
+  trading_core/   shared core — domain models, ports, trade journal, the generic
+                  GuardedBroker, and the per-venue Capabilities contract
+  ibkr_agent/     IBKR adapter (cpapi/ over the Client Portal API) + the `ibkr` MCP server
+  crypto_agent/   crypto adapter (adapters/ccxt/, spot) + the `crypto` MCP server
 ```
 
-Swapping/extending the broker later (e.g. an `ib_async` data adapter) means touching only `adapters/` + `server/services.py`. The reasoning behind the key choices lives in [DECISIONS.md](DECISIONS.md).
+Each venue is a thin adapter over `trading_core`; adding a third venue is a new `*_agent`
+package, not a change to the core. The diagram above shows the **IBKR** server specifically.
+The reasoning behind the key choices lives in [DECISIONS.md](DECISIONS.md).
 
 ## Also trades crypto (second MCP server)
 
@@ -70,8 +73,9 @@ python -m crypto_agent.healthcheck   # exchange, mode, balance, a quote
 ```
 
 Safety mirrors the IBKR posture: **sandbox** (exchange testnet — free keys, no deposit) is
-paper-first; real money needs a **separate** `CRYPTO_ALLOW_LIVE=true` gate (arming IBKR does
-not arm crypto), and the shared `TRADING_DRY_RUN` / `MAX_ORDER_VALUE` gates apply too. See
+paper-first; the live and dry-run arms are **per-venue** (`CRYPTO_ALLOW_LIVE` /
+`CRYPTO_DRY_RUN`, both independent of the IBKR gates — arming IBKR does not arm crypto),
+while the policy limits (`MAX_ORDER_VALUE`, `MAX_DAILY_VALUE`, …) are shared. See
 [ADR-014](DECISIONS.md) for the rationale and the `CRYPTO_*` keys in
 [`.env.example`](.env.example).
 
