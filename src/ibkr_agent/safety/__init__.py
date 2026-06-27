@@ -1,6 +1,13 @@
-"""Safety layer: paper/live mode, dry-run, value limit, and trading hours."""
+"""Backwards-compatible shim — the safety layer now lives in ``trading_core.safety``.
 
-from .market_hours import is_market_open_now
-from .policy import GuardedBroker, SafetyError
+New code should import from ``trading_core.safety``.
+"""
 
-__all__ = ["GuardedBroker", "SafetyError", "is_market_open_now"]
+from trading_core.safety import (
+    GuardedBroker,
+    SafetyError,
+    is_market_open_at,
+    is_market_open_now,
+)
+
+__all__ = ["GuardedBroker", "SafetyError", "is_market_open_at", "is_market_open_now"]

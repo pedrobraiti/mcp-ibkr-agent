@@ -16,13 +16,14 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..domain.models import (
+from trading_core.domain.models import (
     BracketRequest,
     OrderRequest,
     OrderSide,
     OrderType,
     TrailingType,
 )
+
 from ..keepalive import _alert
 from ..session import SessionKeeper
 from .services import Services, build_services

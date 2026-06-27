@@ -142,6 +142,56 @@ plus fractional **buys by dollar amount** (cashQty) and fractional sells by quan
 headless/scheduled use there's also `python -m ibkr_agent.keepalive` (`ibkr-keepalive`),
 which alerts (`[ALERT] Reauthentication required: ...`) when the user must log in again.
 
+## The crypto server (CCXT) — a second, independent MCP
+
+This repo is a **monorepo of two execution servers** over one shared core (`trading_core`):
+`ibkr` (above) and **`crypto`** (spot, via CCXT). They are **separate processes** with their
+own tools and login — they only share code. Crypto exists because it fixes IBKR's structural
+pain: a **persistent API key** (no gateway, no browser login, no tickle), a **24/7** market,
+and `ccxt` behind one interface.
+
+### Setup (crypto)
+
+1. Fill the `CRYPTO_*` keys in `.env` (mirrored in `.env.example`). Default
+   `CRYPTO_EXCHANGE=binance`, `CRYPTO_TRADING_MODE=sandbox`, `CRYPTO_QUOTE_CCY=USDT`,
+   `CRYPTO_ALLOW_MARGIN=false`, `CRYPTO_ALLOW_LIVE=false`.
+2. **Sandbox = the exchange testnet** (Binance has one): free, separate API keys, fake
+   money — **no deposit needed**. This is the paper-first mode; validate here first.
+3. Register the server (separate from `ibkr` — tools are prefixed per server, so they never
+   collide):
+   ```bash
+   claude mcp add crypto -- /path/to/.venv/Scripts/python.exe -m crypto_agent.server.app
+   ```
+4. Verify: `python -m crypto_agent.healthcheck` (or `crypto-healthcheck`) — reports exchange,
+   mode (sandbox/live), the quote-currency balance and a sample quote.
+
+### Crypto tools (mirror the IBKR names)
+
+`session_status` (probes the keys; returns `account_type` LIVE/PAPER and, when live, a
+`warning`), `market_status` (always open), `get_quote`/`get_quotes`, `account_summary`,
+`positions`, `portfolio`, `buy` (`cash_amount` in the quote ccy via
+`createMarketBuyOrderWithCost`, **or** `quantity` in the base; market or LIMIT),
+`sell` (by `quantity`), `close_position` (sells 100% of the base balance),
+`order_status`, `cancel_order`, `open_orders`, `trade_history`. **Not** offered on crypto:
+brackets, stops, trailing stops, `preview_order` (no exchange whatif).
+
+### Crypto safety specifics
+
+- **Spot-only** by default (`CRYPTO_ALLOW_MARGIN=false`): no margin/leverage, and selling
+  more than you hold (a short) is blocked.
+- **Separate live gate:** real-money crypto needs **both** `CRYPTO_TRADING_MODE=live` **and**
+  `CRYPTO_ALLOW_LIVE=true` — independent of the IBKR `TRADING_ALLOW_LIVE`. Arming IBKR does
+  not arm crypto.
+- **Separate dry-run:** `CRYPTO_DRY_RUN` (default `true`) is independent of the IBKR
+  `TRADING_DRY_RUN`, so crypto stays safe-by-default even when IBKR's dry-run is off.
+- The shared **policy limits** (`MAX_ORDER_VALUE`, `MAX_DAILY_VALUE`,
+  `DUPLICATE_WINDOW_SECONDS`) apply to crypto too; `MAX_ORDER_VALUE` is read in the **quote
+  currency** (e.g. USDT). The live/dry-run *arms* are per-venue.
+- **Real-money caveat:** unlike IBKR's native paper account, not every exchange has a
+  sandbox. With `CRYPTO_TRADING_MODE=live`, even with dry-run on, the agent is one step from
+  real money. Also note exchanges enforce a **minimum notional per pair** (Binance spot
+  ~5 USDT) — a sub-minimum order is rejected by the exchange (the adapter catches it first).
+
 ## Safety — read before placing any order
 
 Valet ships safe by default and you must keep it that way:

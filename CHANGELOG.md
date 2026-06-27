@@ -6,6 +6,21 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Second MCP server: `crypto` (CCXT) — a spot crypto execution venue.** The repo is now
+  a monorepo of two independent execution servers over one shared core: `ibkr` (unchanged)
+  and `crypto`. Auth is just a persistent API key (no gateway, no browser login, no
+  tickle), the market is 24/7, and `ccxt` unifies ~100 exchanges. Spot-only by default;
+  tools mirror the IBKR names (`session_status`, `get_quote`, `buy`, `sell`,
+  `close_position`, `open_orders`, …) so an orchestrating skill can treat both uniformly.
+  Buy-by-value (the cashQty analogue) uses `createMarketBuyOrderWithCost` with a
+  price-based fallback. New `crypto-healthcheck`. Sandbox (exchange testnet) is paper-first;
+  live needs a **separate** `CRYPTO_ALLOW_LIVE=true` gate (arming IBKR does not arm crypto).
+- **Shared `trading_core` package.** The domain models, ports, trade journal and the safety
+  guard were extracted into `trading_core`, leaving thin venue adapters (`ibkr_agent`,
+  `crypto_agent`). The `GuardedBroker` is now venue-agnostic: it reads a per-venue
+  `Capabilities` contract and sizes exits via a `held_quantity` port instead of IBKR's
+  conid. IBKR behavior is unchanged (the original suite stays green; old import paths keep
+  working via shims).
 - **`session_status` and `portfolio` report `account_type`** (`"LIVE"`/`"PAPER"`)
   straight from IBKR's `isPaper` — the ground truth, independent of the cosmetic
   `IBKR_TRADING_MODE` label. A LIVE account also returns an explicit `warning`, so the

@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal, InvalidOperation
 
-from ...domain.models import AccountSummary, Position, Quote
+from trading_core.domain.models import AccountSummary, Position, Quote
+
 from .client import CpapiClient, CpapiError
 
 FIELD_LAST = "31"
@@ -137,6 +138,17 @@ class CpapiMarketData:
                     positions.append(position)
             page += 1
         return positions
+
+    async def held_quantity(self, symbol: str) -> Decimal | None:
+        """Signed net quantity held for ``symbol`` (>0 long, <0 short), or ``None`` if the
+        instrument can't be resolved. Refreshes the eventually-consistent cache first so a
+        just-bought position is visible and its sell isn't mistaken for a naked short."""
+        conid = await self.resolve_conid(symbol)
+        if conid is None:
+            return None
+        await self.invalidate_positions()
+        positions = await self.get_positions()
+        return sum((p.quantity for p in positions if p.conid == conid), Decimal(0))
 
     async def invalidate_positions(self) -> None:
         """Ask the gateway to invalidate the positions cache (best-effort).

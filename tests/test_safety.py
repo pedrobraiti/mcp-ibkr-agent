@@ -63,6 +63,9 @@ class FakeMarketData:
             return []
         return [Position(conid=1, symbol="AAPL", quantity=self._held)]
 
+    async def held_quantity(self, symbol: str) -> Decimal | None:
+        return self._held
+
     async def invalidate_positions(self) -> None: ...
 
 

@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
-from ...domain.models import (
+from trading_core.domain.models import (
     BracketRequest,
     OrderPreview,
     OrderRequest,
@@ -23,6 +23,7 @@ from ...domain.models import (
     OrderStatus,
     OrderType,
 )
+
 from .client import CpapiClient, CpapiError
 
 # Benign warnings accepted by default — standard CPAPI precaution confirmations

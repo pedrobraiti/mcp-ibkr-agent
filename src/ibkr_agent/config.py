@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .domain.models import TradingMode
+from trading_core.domain.models import TradingMode
 
 logger = logging.getLogger(__name__)
 

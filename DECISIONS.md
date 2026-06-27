@@ -325,3 +325,39 @@ Binding every identity/idempotency decision to fail closed removes the whole cla
 "silently did the wrong thing." The skipped items are documented here so a future reader
 sees they were weighed and declined, not missed — and so the false alarm isn't
 re-litigated.
+
+---
+
+## ADR-014 — A second venue (crypto/CCXT) as a sibling MCP over a shared core
+
+**Decision.** Evolve the repo into a **monorepo of two execution servers** —
+`ibkr` (unchanged) and a new `crypto` server over **CCXT** — sharing a `trading_core`
+package (domain models, ports, trade journal, and a now venue-agnostic `GuardedBroker`).
+The two are **separate MCP processes** with their own login and tools; they only share
+code. Spot-only by default.
+
+**Why.** The structural weakness of the setup was never the code — it was **IBKR retail
+auth**: no OAuth, so the session needs a local gateway, a manual browser login, a
+keep-alive tickle, and a daily teardown. For an agent meant to run on its own, that's
+fragile. Crypto exchanges remove exactly that: a **persistent API key** (no gateway/
+browser/tickle), a **24/7** market, and CCXT unifies ~100 venues behind one interface that
+slots into the existing hexagonal port. Reusing one safety core means the guards are
+written once and both venues inherit them.
+
+**How it stays generic.** The guard stopped assuming IBKR: position sizing for exits moved
+from a conid lookup to a `held_quantity(symbol)` port, the paper/live account check became
+venue-neutral (wording parameterized), and each venue declares a `Capabilities` contract
+(market-hours model, shorting, buy-by-value, quote currency). Buy-by-value — IBKR's
+`cashQty` — maps to CCXT's `createMarketBuyOrderWithCost` with a price-based fallback.
+Extraction was behavior-preserving: the original IBKR suite stays green and old import
+paths keep working via shims.
+
+**Safety choices specific to crypto.** Sandbox (exchange testnet) is paper-first, but not
+every exchange has one, so dry-run remains the real backstop. The real-money arm is a
+**separate** `CRYPTO_ALLOW_LIVE` gate (arming IBKR must not arm crypto). Spot-only is a hard
+default (`CRYPTO_ALLOW_MARGIN=false`); enabling it is what allows shorting.
+
+**Alternatives considered.** A separate repo for crypto (rejected — the shared `trading_core`
+only stays simple if the servers live together); putting crypto tools in the research MCP
+(wrong layer — research ≠ execution); margin/derivatives now (out of scope — spot-only);
+`ccxt.pro`/websockets (REST is enough to start).

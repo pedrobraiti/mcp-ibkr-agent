@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from trading_core.capabilities import IBKR_CAPABILITIES
+from trading_core.journal import TradeJournal
+from trading_core.safety import GuardedBroker, is_market_open_now
+
 from ..adapters.cpapi import CpapiBroker, CpapiClient, CpapiMarketData, GatewayAuth
 from ..config import Settings, get_settings
-from ..journal import TradeJournal
-from ..safety import GuardedBroker, is_market_open_now
 
 
 @dataclass
@@ -51,7 +53,7 @@ def build_services(settings: Settings | None = None) -> Services:
         allow_live=settings.trading_allow_live,
         dry_run=settings.trading_dry_run,
         max_order_value=settings.max_order_value,
-        require_market_open=True,
+        require_market_open=IBKR_CAPABILITIES.requires_market_open,
         is_market_open=lambda: is_market_open_now(
             settings.market_timezone, settings.market_open_time, settings.market_close_time
         ),

@@ -49,6 +49,32 @@ server/      MCP server (FastMCP) + dependency composition
 
 Swapping/extending the broker later (e.g. an `ib_async` data adapter) means touching only `adapters/` + `server/services.py`. The reasoning behind the key choices lives in [DECISIONS.md](DECISIONS.md).
 
+## Also trades crypto (second MCP server)
+
+This repo is a **monorepo of two execution servers** over one shared safety core
+(`trading_core`): the IBKR server above, and a **`crypto`** server (spot, via
+[CCXT](https://github.com/ccxt/ccxt)). They are **separate MCP processes** — own login,
+own tools, registered separately — and only share code.
+
+Crypto is here because it removes IBKR's structural friction: a **persistent API key**
+(no gateway, no daily browser login, no tickle), a **24/7** market, and CCXT behind one
+interface for ~100 exchanges. The tools **mirror the IBKR names** (`session_status`,
+`get_quote`, `buy`, `sell`, `close_position`, `open_orders`, …) so one skill can drive both
+venues uniformly. Buy-by-value mirrors IBKR's `cashQty` via CCXT's
+`createMarketBuyOrderWithCost`. **Spot-only** by default.
+
+```bash
+# register the crypto server (separate from ibkr)
+claude mcp add crypto -- /path/to/.venv/Scripts/python.exe -m crypto_agent.server.app
+python -m crypto_agent.healthcheck   # exchange, mode, balance, a quote
+```
+
+Safety mirrors the IBKR posture: **sandbox** (exchange testnet — free keys, no deposit) is
+paper-first; real money needs a **separate** `CRYPTO_ALLOW_LIVE=true` gate (arming IBKR does
+not arm crypto), and the shared `TRADING_DRY_RUN` / `MAX_ORDER_VALUE` gates apply too. See
+[ADR-014](DECISIONS.md) for the rationale and the `CRYPTO_*` keys in
+[`.env.example`](.env.example).
+
 ## Why fractional matters
 
 Most retail trading APIs force you into whole shares. This project leans on the IBKR Client Portal API's `cashQty` field, which lets you buy by **dollar amount** (e.g. "$50 of AAPL") and get a fractional position — the unlock for dollar-cost averaging, rebalancing, and small accounts. See [DECISIONS.md](DECISIONS.md) for the full rationale.
