@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from ibkr_agent.domain.models import (
+from trading_core.domain.models import (
     OrderPreview,
     OrderRequest,
     OrderResult,
@@ -12,7 +12,7 @@ from ibkr_agent.domain.models import (
     Quote,
     TradingMode,
 )
-from ibkr_agent.safety import GuardedBroker, SafetyError
+from trading_core.safety import GuardedBroker, SafetyError
 
 
 class FakeBroker:
@@ -128,7 +128,7 @@ async def test_sell_over_limit_is_allowed():
 
 
 async def test_stop_loss_over_limit_is_allowed():
-    from ibkr_agent.domain.models import OrderType
+    from trading_core.domain.models import OrderType
 
     broker = FakeBroker()
     guarded = _guarded(broker, FakeMarketData(Decimal("60"), held=Decimal("5")))  # 5*60=300>100
@@ -178,7 +178,7 @@ def _buy(symbol: str, amount: str) -> OrderRequest:
 
 
 async def test_daily_limit_blocks_after_cumulative_spend(tmp_path):
-    from ibkr_agent.journal import TradeJournal
+    from trading_core.journal import TradeJournal
 
     journal = TradeJournal(tmp_path / "trades.jsonl")
     guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10")),
@@ -190,7 +190,7 @@ async def test_daily_limit_blocks_after_cumulative_spend(tmp_path):
 
 
 async def test_duplicate_order_blocked(tmp_path):
-    from ibkr_agent.journal import TradeJournal
+    from trading_core.journal import TradeJournal
 
     journal = TradeJournal(tmp_path / "trades.jsonl")
     guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("10")),
@@ -284,7 +284,7 @@ async def test_naked_short_blocked_and_allowed_with_flag():
 
 
 async def test_inverted_stop_blocked():
-    from ibkr_agent.domain.models import OrderType
+    from trading_core.domain.models import OrderType
 
     # SELL stop AT/ABOVE the market (last=50) would fire instantly — fat-finger.
     guarded = _guarded(FakeBroker(), FakeMarketData(Decimal("50"), held=Decimal("5")))
@@ -328,7 +328,7 @@ async def test_value_cap_not_bypassed_by_zero_price():
 
 
 async def test_bracket_take_profit_inverted_vs_market_blocked():
-    from ibkr_agent.domain.models import BracketRequest
+    from trading_core.domain.models import BracketRequest
 
     # BUY bracket, take_profit (49) BELOW the market (last=50): the SELL limit would fill
     # instantly when the entry fills. (tp=49 > sl=10 passes the model; the guard catches it.)
@@ -386,7 +386,7 @@ async def test_concurrent_identical_buys_are_serialized(tmp_path):
     # critical section is locked). Exactly one goes through; the other is blocked.
     import asyncio
 
-    from ibkr_agent.journal import TradeJournal
+    from trading_core.journal import TradeJournal
 
     journal = TradeJournal(tmp_path / "t.jsonl")
     broker = FakeBroker()
@@ -454,7 +454,7 @@ async def test_buying_beyond_the_short_stays_capped():
 
 
 async def test_marketable_limit_bracket_is_blocked():
-    from ibkr_agent.domain.models import BracketRequest, OrderType
+    from trading_core.domain.models import BracketRequest, OrderType
 
     # BUY LIMIT @100 with market at 90 fills ~90 (marketable), so stop_loss 95 would fire
     # instantly. The model passes (110>100>95); the guard must catch it via the fill price.
@@ -476,7 +476,7 @@ async def test_concurrent_identical_sells_are_serialized(tmp_path):
     # both slip past the duplicate guard into a double-exit.
     import asyncio
 
-    from ibkr_agent.journal import TradeJournal
+    from trading_core.journal import TradeJournal
 
     journal = TradeJournal(tmp_path / "t.jsonl")
     broker = FakeBroker()
@@ -492,7 +492,7 @@ async def test_concurrent_identical_sells_are_serialized(tmp_path):
 
 
 async def test_limit_entry_bracket_not_blocked_by_market_check():
-    from ibkr_agent.domain.models import BracketRequest, OrderType
+    from trading_core.domain.models import BracketRequest, OrderType
 
     # "Buy the dip": LIMIT entry @90, take_profit 95, stop_loss 85 — valid vs the 90 fill,
     # even though 95 is below the current market (100). Must NOT be blocked.
@@ -509,7 +509,7 @@ async def test_limit_entry_bracket_not_blocked_by_market_check():
 
 
 async def test_bracket_stop_loss_inverted_vs_market_blocked():
-    from ibkr_agent.domain.models import BracketRequest
+    from trading_core.domain.models import BracketRequest
 
     # BUY bracket, but stop_loss (95) is ABOVE the market (last=50): the SELL stop would
     # fire instantly when the entry fills. (tp>sl passes the model; the guard catches this.)

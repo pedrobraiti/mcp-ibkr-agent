@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ibkr_agent.safety.market_hours import is_market_open_at
+from trading_core.safety.market_hours import is_market_open_at
 
 ET = ZoneInfo("America/New_York")
 

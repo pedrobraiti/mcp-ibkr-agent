@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from ibkr_agent.adapters.cpapi import CpapiBroker, CpapiClient, CpapiError
-from ibkr_agent.domain.models import (
+from trading_core.domain.models import (
     BracketRequest,
     OrderRequest,
     OrderSide,

@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from ibkr_agent.domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
+from trading_core.domain.models import BracketRequest, OrderRequest, OrderSide, OrderType
 
 
 def test_quantity_order_is_valid_and_not_fractional():

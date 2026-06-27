@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from ibkr_agent.domain.models import (
+from trading_core.domain.models import (
     OrderRequest,
     OrderResult,
     OrderSide,
@@ -8,7 +8,7 @@ from ibkr_agent.domain.models import (
     OrderType,
     TradingMode,
 )
-from ibkr_agent.journal import TradeJournal
+from trading_core.journal import TradeJournal
 
 PLACED = OrderResult(order_id="1", status=OrderStatus.SUBMITTED, symbol="AAPL", side=OrderSide.BUY)
 

@@ -3,7 +3,10 @@ from decimal import Decimal
 import pytest
 
 from ibkr_agent.config import Settings
-from ibkr_agent.domain.models import (
+from ibkr_agent.server import app
+from ibkr_agent.server.app import mcp
+from ibkr_agent.server.services import Services, build_services
+from trading_core.domain.models import (
     AccountSummary,
     OrderPreview,
     OrderRequest,
@@ -14,11 +17,8 @@ from ibkr_agent.domain.models import (
     Quote,
     TradingMode,
 )
-from ibkr_agent.journal import TradeJournal
-from ibkr_agent.safety import GuardedBroker
-from ibkr_agent.server import app
-from ibkr_agent.server.app import mcp
-from ibkr_agent.server.services import Services, build_services
+from trading_core.journal import TradeJournal
+from trading_core.safety import GuardedBroker
 
 
 async def test_tools_are_registered():
