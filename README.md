@@ -116,7 +116,7 @@ See `.env.example`. Main keys:
 | `TRADING_DRY_RUN` | `true` | Validates but **does not send** orders |
 | `TRADING_ALLOW_SHORT` | `false` | Allow a SELL bigger than the held position (opening a short) |
 | `MAX_ORDER_VALUE` | `100.0` | Per-order limit (USD) |
-| `MAX_DAILY_VALUE` | — | Cumulative daily buy cap (empty = no cap) |
+| `MAX_DAILY_VALUE` | — | Cumulative daily buy cap (empty = **no cap**; only the per-order `MAX_ORDER_VALUE` then applies). When empty **and** live trading is armed, the server logs a loud startup warning — set a number to bound cumulative daily spend. |
 | `DUPLICATE_WINDOW_SECONDS` | `5` | Reject identical orders within this window (`0` = off) |
 
 ## Running
@@ -234,7 +234,8 @@ Every tool returns an `{"ok": ..., "data": ...}` envelope. A real example of an 
 - **Buys** above `MAX_ORDER_VALUE` are rejected (it's a spend cap; exits — sells, closes, stop-losses — aren't value-gated, so a large position can always be closed or protected).
 - Orders only during regular trading hours (RTH), accounting for **NYSE holidays** (via the `holidays` lib).
 - CPAPI confirmation warnings are auto-accepted only through an allow-list; an unknown warning **blocks** the order.
-- Optional **daily spend cap** (`MAX_DAILY_VALUE`) across all buys, tracked in the audit log — not just per-order.
+- Optional **daily spend cap** (`MAX_DAILY_VALUE`) across all buys, tracked in the audit log — not just per-order. It is **off by default** (no cap): out of the box only the per-order `MAX_ORDER_VALUE` bounds spending, so many sub-cap buys are unbounded over a day. When it's off **and** live trading is armed (`TRADING_ALLOW_LIVE` / `CRYPTO_ALLOW_LIVE`), the server emits a loud startup warning — set `MAX_DAILY_VALUE` to bound cumulative daily spend.
+- The audit-backed caps treat an **`inactive`** order conservatively: CPAPI uses `inactive` for both a dead order and one parked until the open (and a rejected order can arrive as `inactive` too), so it **counts toward** the daily cap and duplicate window on purpose — the fail-safe direction (it may over-block a retry, never over-spend).
 - **Duplicate-order guard**: an identical order within `DUPLICATE_WINDOW_SECONDS` is rejected (protects against timeout/retry double-buys).
 - Every order attempt (sent, dry-run, or blocked) is written to a local **audit log** (`logs/trades.jsonl`, gitignored).
 - Optional **symbol allow/deny list** (`SYMBOL_ALLOWLIST` / `SYMBOL_DENYLIST`) restricts the universe the agent can trade.

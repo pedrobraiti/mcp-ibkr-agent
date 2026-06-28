@@ -361,3 +361,33 @@ default (`CRYPTO_ALLOW_MARGIN=false`); enabling it is what allows shorting.
 only stays simple if the servers live together); putting crypto tools in the research MCP
 (wrong layer — research ≠ execution); margin/derivatives now (out of scope — spot-only);
 `ccxt.pro`/websockets (REST is enough to start).
+
+---
+
+## ADR-015 — Daily-cap default stays off but warns loudly; `inactive` counts conservatively
+
+**Context.** Two LOW-severity backlog items on the spend backstops. (1) `MAX_DAILY_VALUE`
+defaults to None, so out of the box the only dollar backstop is the per-order
+`MAX_ORDER_VALUE` — a loop of many sub-cap buys has no cumulative daily ceiling. (2) The
+journal's `spent_today`/`has_recent_duplicate` exclude only `rejected`/`cancelled`, so an
+`inactive` order counts toward both the daily cap and the duplicate window.
+
+**Decision — keep both defaults, make the gap visible.**
+
+- **Daily cap: no silent default, loud warning instead.** Flipping `MAX_DAILY_VALUE` to a
+  non-null number by default would silently change behavior for existing setups (and any
+  guessed number is wrong for someone). Instead, when it's unset **and** live trading is
+  armed (`TRADING_ALLOW_LIVE` for IBKR, `CRYPTO_ALLOW_LIVE` for crypto), `get_settings`
+  emits a loud startup warning — mirroring the existing typo-warning — telling the operator
+  that only the per-order cap applies. Documented in `.env.example` and the README.
+- **`inactive` counts toward caps on purpose.** CPAPI uses `inactive` for *both* a
+  dead/rejected order and one parked until the open — and (per the broker's status map) a
+  genuinely rejected order also arrives as `inactive`, since CPAPI doesn't emit a `Rejected`
+  string. There is **no reliable sub-reason offline** to tell dead from parked, so rather
+  than guess we keep `inactive` counting toward spend and the duplicate window. The
+  direction is fail-safe: it may over-block a retry, but it never lets real spend slip the
+  cap. If a future live gateway exposes a trustworthy sub-status, this can be refined.
+
+**Why.** Both choices follow ADR-013's principle: uncertainty fails closed, and a
+behavior gap is surfaced loudly rather than papered over with a default that could
+surprise someone or a distinction we can't actually make.

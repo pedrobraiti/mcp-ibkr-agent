@@ -104,6 +104,12 @@ class TradeJournal:
                 continue
             if not (entry.get("order_id") or entry.get("sent")):
                 continue
+            # Only rejected/cancelled are excluded — NOT `inactive`. CPAPI emits `inactive`
+            # for BOTH a dead/rejected order AND one parked until the open, and (per the
+            # broker's status map) a genuinely rejected order arrives as `inactive` too —
+            # there is no reliable sub-reason offline to tell the two apart. So we keep
+            # counting an `inactive` buy toward spend on purpose: the fail-safe direction is
+            # to assume money may have moved (over-block, never over-spend). See ADR-015.
             if entry.get("status") in ("rejected", "cancelled"):
                 continue
             try:
@@ -126,6 +132,11 @@ class TradeJournal:
             # corrected retry must be allowed).
             if not (entry.get("sent") or entry.get("order_id")):
                 continue
+            # As in `spent_today`, only rejected/cancelled are excluded — an `inactive`
+            # entry still counts. CPAPI uses `inactive` for both a dead order and one parked
+            # until the open, with no reliable offline way to distinguish them, so the
+            # fail-safe choice is to treat it as a live duplicate (block a possible
+            # double-send) rather than wave a retry through. See ADR-015.
             if entry.get("status") in ("rejected", "cancelled"):
                 continue
             entry_size = entry.get("cash_qty") or entry.get("quantity")

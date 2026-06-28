@@ -103,8 +103,26 @@ def _warn_unknown_safety_keys() -> None:
             )
 
 
+def _warn_if_daily_cap_off(settings: CryptoSettings) -> None:
+    """Warn loudly when there is no daily spend cap while live crypto trading is armed.
+
+    ``MAX_DAILY_VALUE`` defaults to None (no cap), so out of the box the only quote-ccy
+    backstop is the per-order ``MAX_ORDER_VALUE`` — a loop of many sub-cap buys then has
+    no cumulative ceiling. We do NOT silently flip the default to a number (that could
+    surprise existing setups); instead we surface it loudly when live trading is actually
+    possible, so the operator makes the call consciously.
+    """
+    if settings.max_daily_value is None and settings.crypto_allow_live:
+        logger.warning(
+            "No daily spend cap set (MAX_DAILY_VALUE unset) while live trading is enabled "
+            "— only the per-order cap (MAX_ORDER_VALUE) applies; set MAX_DAILY_VALUE to "
+            "bound cumulative daily spend."
+        )
+
+
 @lru_cache
 def get_settings() -> CryptoSettings:
     settings = CryptoSettings()
     _warn_unknown_safety_keys()
+    _warn_if_daily_cap_off(settings)
     return settings
