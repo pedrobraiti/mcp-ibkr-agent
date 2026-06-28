@@ -12,9 +12,27 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .domain.models import OrderStatus
+
 
 class _BrokerLike(Protocol):
     async def get_live_orders(self) -> list: ...
+
+
+def _resolution_status(order: object) -> str:
+    """The status to journal a found order with, for SPEND accounting.
+
+    An order that PARTIALLY FILLED moved real money even if its aggregate venue status is
+    ``cancelled``/``rejected`` (timeout-without-ack → partial fill → remainder cancelled). A
+    no-money status would wrongly FREE the daily budget for spend that actually happened, so an
+    order with any positive fill resolves as ``filled`` and keeps counting — the fail-safe,
+    over-block direction, mirroring ADR-015 ("when money may have moved, count it"). A genuinely
+    zero-fill cancel/reject keeps its real status and correctly frees the budget.
+    """
+    filled = getattr(order, "filled_quantity", None)
+    if filled is not None and filled > 0:
+        return OrderStatus.FILLED.value
+    return order.status.value
 
 
 def _live_ref(order: object) -> str | None:
@@ -59,11 +77,14 @@ async def reconcile_pending(broker: _BrokerLike, journal, *, resolve_missing: bo
         coid = intent.get("client_order_id")
         found = live_by_ref.get(coid)
         if found is not None:
+            # A partial fill moved money even under a cancelled/rejected aggregate status —
+            # resolve as filled so the spend keeps counting (never free real spend; ADR-016).
+            resolved_status = _resolution_status(found)
             journal.mark_resolved(
-                coid, status=found.status.value, order_id=found.order_id,
-                message="reconciled: found resting on the venue",
+                coid, status=resolved_status, order_id=found.order_id,
+                message="reconciled: found on the venue",
             )
-            report["resolved"].append({**_summary(intent), "status": found.status.value,
+            report["resolved"].append({**_summary(intent), "status": resolved_status,
                                         "order_id": found.order_id})
         elif resolve_missing:
             journal.mark_resolved(

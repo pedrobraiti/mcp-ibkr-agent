@@ -5,6 +5,17 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-28
+
+### Fixed
+- **A partially-filled-then-cancelled order no longer frees daily budget** (adversarial-QA
+  follow-up to 0.5.1). The 0.5.1 "reconciled cancel frees budget" path trusted the aggregate
+  venue status; an order that timed out without an ack, then partially filled and had its
+  remainder cancelled, would free the full notional despite moving real money — an over-spend
+  (the dangerous direction). `reconcile` now checks `filled_quantity`: any positive fill
+  resolves as `filled` and keeps counting (fail-safe); only a genuine zero-fill cancel frees
+  the budget. Bounded, IBKR-only edge; closed before it could matter. ADR-016.
+
 ## [0.5.1] - 2026-06-28
 
 ### Fixed

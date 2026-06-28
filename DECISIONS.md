@@ -406,6 +406,12 @@ feature: the safe direction is to over-block *uncertain* spend, not *confirmed-z
 `spent_today` now honors a terminal reconcile status — a reconciled `cancelled`/`rejected`
 frees the budget, while `unknown`/`filled`/`inactive` keep counting (still fail-safe). This
 also keeps the system from paternalistically blocking a deliberate order for a non-reason.
+**Critical exception (adversarial-QA follow-up):** a `cancelled`/`rejected` order that
+nonetheless **partially filled** moved real money, so freeing it would let real spend slip the
+cap (an over-spend, the dangerous direction). `reconcile` therefore checks `filled_quantity`:
+any positive fill resolves as `filled` (keeps counting, fail-safe over-block); only a genuine
+zero-fill cancel frees the budget. This is the same partial-fill assumption ADR-015 rejected
+for `inactive`, held consistently on the `cancelled`-frees path.
 
 **Decision 2 — the idempotency guard is single-writer; run one Valet server per account.**
 The persistent cOID guard (`has_unresolved_dispatch`) reads the journal before each order, so

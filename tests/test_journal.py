@@ -268,6 +268,45 @@ async def test_reconcile_resolves_orders_found_on_venue(tmp_path):
     assert journal.has_unresolved_dispatch(buy) is False  # block lifted
 
 
+async def test_reconcile_partial_fill_under_cancel_does_not_free_budget(tmp_path):
+    # A timed-out order that PARTIALLY FILLED then cancelled moved real money — reconciling it
+    # must NOT free the daily budget (that would let real spend slip the cap). It resolves as
+    # 'filled' (fail-safe), keeping the spend; only a genuine zero-fill cancel frees it.
+    from trading_core.reconcile import reconcile_pending
+
+    journal = TradeJournal(tmp_path / "t.jsonl")
+    buy = _orphan(journal)  # notional 10, in flight
+    assert journal.spent_today() == Decimal("10")
+
+    class _PartialFillBroker:
+        async def get_live_orders(self):
+            return [OrderResult(order_id="900", status=OrderStatus.CANCELLED, symbol="AAPL",
+                                side=OrderSide.BUY, filled_quantity=Decimal("3"),
+                                raw={"order_ref": "coid-1"})]
+
+    report = await reconcile_pending(_PartialFillBroker(), journal)
+    assert report["resolved"][0]["status"] == "filled"  # money moved → counts, not freed
+    assert journal.has_unresolved_dispatch(buy) is False  # block still lifted
+    assert journal.spent_today() == Decimal("10")  # budget NOT freed (real spend occurred)
+
+
+async def test_reconcile_zero_fill_cancel_frees_budget(tmp_path):
+    from trading_core.reconcile import reconcile_pending
+
+    journal = TradeJournal(tmp_path / "t.jsonl")
+    _orphan(journal)
+    assert journal.spent_today() == Decimal("10")
+
+    class _CleanCancelBroker:
+        async def get_live_orders(self):
+            return [OrderResult(order_id="901", status=OrderStatus.CANCELLED, symbol="AAPL",
+                                side=OrderSide.BUY, filled_quantity=Decimal("0"),
+                                raw={"order_ref": "coid-1"})]
+
+    await reconcile_pending(_CleanCancelBroker(), journal)
+    assert journal.spent_today() == Decimal("0")  # genuinely no money moved → freed
+
+
 async def test_reconcile_keeps_missing_blocked_unless_forced(tmp_path):
     from trading_core.reconcile import reconcile_pending
 
