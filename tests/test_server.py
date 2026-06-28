@@ -302,6 +302,40 @@ async def test_session_status_skips_account_lookup_when_unauthenticated(monkeypa
     assert "account_type" not in out["data"]
 
 
+def _services_with_settings(settings):
+    return Services(
+        settings=settings, client=None, auth=_FakeAuth(),
+        market_data=_FakeMarketData(), broker=None,
+        journal=TradeJournal("logs/unused.jsonl"),
+    )
+
+
+async def test_session_status_warns_when_live_and_no_daily_cap(monkeypatch):
+    settings = Settings(ibkr_account_id="DU1", trading_allow_live=True, max_daily_value=None)
+    monkeypatch.setattr(app, "_services", _services_with_settings(settings))
+    out = await app.session_status()
+    assert out["data"]["daily_cap_configured"] is False
+    assert "MAX_DAILY_VALUE" in out["data"]["daily_cap_warning"]
+
+
+async def test_session_status_no_daily_cap_warning_when_cap_set(monkeypatch):
+    settings = Settings(
+        ibkr_account_id="DU1", trading_allow_live=True, max_daily_value=Decimal("500")
+    )
+    monkeypatch.setattr(app, "_services", _services_with_settings(settings))
+    out = await app.session_status()
+    assert out["data"]["daily_cap_configured"] is True
+    assert "daily_cap_warning" not in out["data"]
+
+
+async def test_session_status_no_daily_cap_warning_when_live_off(monkeypatch):
+    settings = Settings(ibkr_account_id="DU1", trading_allow_live=False, max_daily_value=None)
+    monkeypatch.setattr(app, "_services", _services_with_settings(settings))
+    out = await app.session_status()
+    assert out["data"]["daily_cap_configured"] is False
+    assert "daily_cap_warning" not in out["data"]
+
+
 async def test_close_position_cooldown_blocks_immediate_reclose(monkeypatch):
     app._recent_closes.clear()
     market_data = _FakeMarketData()

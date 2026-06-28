@@ -14,6 +14,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trading_core.domain.models import TradingMode
@@ -21,6 +22,8 @@ from trading_core.domain.models import TradingMode
 logger = logging.getLogger(__name__)
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+_DEFAULT_MAX_ORDER_VALUE = Decimal("100")
 
 # We only police the CRYPTO_* keys this server owns: the shared .env also holds the IBKR
 # server's keys (IBKR_*, and IBKR-only TRADING_* like TRADING_ALLOW_LIVE), and warning on
@@ -55,7 +58,7 @@ class CryptoSettings(BaseSettings):
     crypto_dry_run: bool = True
 
     # --- shared safety gates (policy limits, shared across both venues) ---
-    max_order_value: Decimal = Decimal("100")
+    max_order_value: Decimal = _DEFAULT_MAX_ORDER_VALUE
     max_daily_value: Decimal | None = None
     duplicate_window_seconds: float = 5.0
     symbol_allowlist: str = ""
@@ -65,6 +68,25 @@ class CryptoSettings(BaseSettings):
     crypto_trade_journal_path: str = "logs/crypto_trades.jsonl"
 
     log_level: str = "INFO"
+
+    @field_validator("max_daily_value", mode="before")
+    @classmethod
+    def _blank_daily_cap_means_none(cls, value: object) -> object:
+        # An empty OS env var (``MAX_DAILY_VALUE=``) arrives as "", which pydantic cannot
+        # parse as a Decimal — the server would refuse to start. Treat blank as unset (no
+        # cap), exactly as an empty value in the .env file already loads.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("max_order_value", mode="before")
+    @classmethod
+    def _blank_order_cap_means_default(cls, value: object) -> object:
+        # Same blank-OS-env tolerance for the required per-order cap: fall back to the
+        # default instead of crashing on ``MAX_ORDER_VALUE=`` (None is not a valid value here).
+        if isinstance(value, str) and not value.strip():
+            return _DEFAULT_MAX_ORDER_VALUE
+        return value
 
     @property
     def trading_mode(self) -> TradingMode:
@@ -78,6 +100,15 @@ class CryptoSettings(BaseSettings):
     @property
     def is_sandbox(self) -> bool:
         return self.crypto_trading_mode is CryptoMode.SANDBOX
+
+
+def daily_cap_off_while_live(settings: CryptoSettings) -> bool:
+    """No daily spend cap is set while live crypto trading is armed.
+
+    Single source of truth for both the startup warning and the ``session_status`` field the
+    agent relays to the user, so they can never drift apart.
+    """
+    return settings.max_daily_value is None and settings.crypto_allow_live
 
 
 def _warn_unknown_safety_keys() -> None:
@@ -112,10 +143,10 @@ def _warn_if_daily_cap_off(settings: CryptoSettings) -> None:
     surprise existing setups); instead we surface it loudly when live trading is actually
     possible, so the operator makes the call consciously.
     """
-    if settings.max_daily_value is None and settings.crypto_allow_live:
+    if daily_cap_off_while_live(settings):
         logger.warning(
             "No daily spend cap set (MAX_DAILY_VALUE unset) while live trading is enabled "
-            "— only the per-order cap (MAX_ORDER_VALUE) applies; set MAX_DAILY_VALUE to "
+            "- only the per-order cap (MAX_ORDER_VALUE) applies; set MAX_DAILY_VALUE to "
             "bound cumulative daily spend."
         )
 

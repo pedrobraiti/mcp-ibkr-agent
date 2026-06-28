@@ -57,3 +57,26 @@ def test_crypto_silent_when_live_not_allowed(caplog):
     with caplog.at_level(logging.WARNING, logger="crypto_agent.config"):
         crypto_warn(settings)
     assert not _warned(caplog)
+
+
+# An empty value in the .env file already loads as None; an empty OS env var (MAX_DAILY_VALUE=)
+# arrives as "" and used to crash pydantic's Decimal parsing, preventing the server from
+# starting. The before-validators make the two paths behave the same.
+def test_ibkr_empty_daily_cap_env_loads_as_none(monkeypatch):
+    monkeypatch.setenv("MAX_DAILY_VALUE", "")
+    assert Settings().max_daily_value is None
+
+
+def test_ibkr_empty_order_cap_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("MAX_ORDER_VALUE", "")
+    assert Settings().max_order_value == Decimal("100")
+
+
+def test_crypto_empty_daily_cap_env_loads_as_none(monkeypatch):
+    monkeypatch.setenv("MAX_DAILY_VALUE", "")
+    assert CryptoSettings().max_daily_value is None
+
+
+def test_crypto_empty_order_cap_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("MAX_ORDER_VALUE", "")
+    assert CryptoSettings().max_order_value == Decimal("100")

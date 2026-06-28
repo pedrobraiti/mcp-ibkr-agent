@@ -24,6 +24,7 @@ from trading_core.domain.models import (
     TrailingType,
 )
 
+from ..config import daily_cap_off_while_live
 from ..keepalive import _alert
 from ..session import SessionKeeper
 from .services import Services, build_services
@@ -100,6 +101,9 @@ async def session_status() -> dict:
     `account_type` is the ground truth from IBKR (`isPaper`), NOT the configured
     `IBKR_TRADING_MODE` label — always check it before trading so you never mistake a
     real-money account for paper. When the account is LIVE a `warning` is included.
+
+    Also reports `daily_cap_configured` (whether a cumulative daily spend cap is set) and,
+    when live trading is armed with no cap, a `daily_cap_warning` to relay to the user.
     """
     svc = services()
     try:
@@ -112,6 +116,11 @@ async def session_status() -> dict:
                     "LIVE account — orders placed here move REAL money. "
                     "Confirm symbol, side and amount with the user before sending."
                 )
+        status["daily_cap_configured"] = svc.settings.max_daily_value is not None
+        if daily_cap_off_while_live(svc.settings):
+            status["daily_cap_warning"] = (
+                "No daily spend cap set (MAX_DAILY_VALUE) - only the per-order cap applies."
+            )
         return _ok(status)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)

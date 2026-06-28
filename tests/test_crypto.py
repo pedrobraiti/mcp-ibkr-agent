@@ -261,3 +261,60 @@ async def test_guard_allows_spot_buy_in_sandbox():
     )
     assert result.status is OrderStatus.FILLED
     assert ex.cost_orders == [("BTC/USDT", 50.0)]
+
+
+class _FakeCryptoServices:
+    """Stand-in for the crypto Services that session_status reads (offline)."""
+
+    def __init__(self, settings, *, is_paper=False):
+        self.settings = settings
+        self._is_paper = is_paper
+
+    async def account_info(self) -> dict:
+        return {
+            "account_id": "binance",
+            "is_paper": self._is_paper,
+            "account_type": "PAPER" if self._is_paper else "LIVE",
+        }
+
+
+async def test_crypto_session_status_warns_when_live_and_no_daily_cap(monkeypatch):
+    from crypto_agent.config import CryptoMode, CryptoSettings
+    from crypto_agent.server import app as crypto_app
+
+    settings = CryptoSettings(
+        max_daily_value=None, crypto_allow_live=True, crypto_trading_mode=CryptoMode.LIVE
+    )
+    monkeypatch.setattr(crypto_app, "_services", _FakeCryptoServices(settings))
+    out = await crypto_app.session_status()
+    assert out["ok"] is True
+    assert out["data"]["daily_cap_configured"] is False
+    assert "MAX_DAILY_VALUE" in out["data"]["daily_cap_warning"]
+
+
+async def test_crypto_session_status_silent_when_cap_set(monkeypatch):
+    from crypto_agent.config import CryptoMode, CryptoSettings
+    from crypto_agent.server import app as crypto_app
+
+    settings = CryptoSettings(
+        max_daily_value=Decimal("500"),
+        crypto_allow_live=True,
+        crypto_trading_mode=CryptoMode.LIVE,
+    )
+    monkeypatch.setattr(crypto_app, "_services", _FakeCryptoServices(settings))
+    out = await crypto_app.session_status()
+    assert out["data"]["daily_cap_configured"] is True
+    assert "daily_cap_warning" not in out["data"]
+
+
+async def test_crypto_session_status_silent_when_live_off(monkeypatch):
+    from crypto_agent.config import CryptoMode, CryptoSettings
+    from crypto_agent.server import app as crypto_app
+
+    settings = CryptoSettings(
+        max_daily_value=None, crypto_allow_live=False, crypto_trading_mode=CryptoMode.SANDBOX
+    )
+    monkeypatch.setattr(crypto_app, "_services", _FakeCryptoServices(settings, is_paper=True))
+    out = await crypto_app.session_status()
+    assert out["data"]["daily_cap_configured"] is False
+    assert "daily_cap_warning" not in out["data"]

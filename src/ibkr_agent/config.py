@@ -7,6 +7,7 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trading_core.domain.models import TradingMode
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 # Absolute path to the .env at the project root, so the server can find it regardless of
 # the directory it is started from (e.g. when Claude Code launches the MCP).
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+_DEFAULT_MAX_ORDER_VALUE = Decimal("100")
 
 # Prefixes of settings that affect safety/behavior. A key with one of these prefixes that
 # isn't a known field is almost certainly a typo — and because unknown keys are ignored,
@@ -38,7 +41,7 @@ class Settings(BaseSettings):
     trading_dry_run: bool = True
     # Allow a SELL larger than the held position (i.e. opening a short). Off by default.
     trading_allow_short: bool = False
-    max_order_value: Decimal = Decimal("100")
+    max_order_value: Decimal = _DEFAULT_MAX_ORDER_VALUE
     # Cumulative spend across all buys in a day (market tz). None = no daily cap.
     max_daily_value: Decimal | None = None
     # Reject an identical order (symbol/side/size) placed within this window. 0 = off.
@@ -64,6 +67,34 @@ class Settings(BaseSettings):
     market_close_time: str = "16:00"
 
     log_level: str = "INFO"
+
+    @field_validator("max_daily_value", mode="before")
+    @classmethod
+    def _blank_daily_cap_means_none(cls, value: object) -> object:
+        # An empty OS env var (``MAX_DAILY_VALUE=``) arrives as "", which pydantic cannot
+        # parse as a Decimal — the server would refuse to start. Treat blank as unset (no
+        # cap), exactly as an empty value in the .env file already loads.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("max_order_value", mode="before")
+    @classmethod
+    def _blank_order_cap_means_default(cls, value: object) -> object:
+        # Same blank-OS-env tolerance for the required per-order cap: fall back to the
+        # default instead of crashing on ``MAX_ORDER_VALUE=`` (None is not a valid value here).
+        if isinstance(value, str) and not value.strip():
+            return _DEFAULT_MAX_ORDER_VALUE
+        return value
+
+
+def daily_cap_off_while_live(settings: Settings) -> bool:
+    """No daily spend cap is set while live trading is armed.
+
+    Single source of truth for both the startup warning and the ``session_status`` field the
+    agent relays to the user, so they can never drift apart.
+    """
+    return settings.max_daily_value is None and settings.trading_allow_live
 
 
 def _warn_unknown_safety_keys() -> None:
@@ -104,10 +135,10 @@ def _warn_if_daily_cap_off(settings: Settings) -> None:
     surprise existing setups); instead we surface it loudly when live trading is actually
     possible, so the operator makes the call consciously.
     """
-    if settings.max_daily_value is None and settings.trading_allow_live:
+    if daily_cap_off_while_live(settings):
         logger.warning(
             "No daily spend cap set (MAX_DAILY_VALUE unset) while live trading is enabled "
-            "— only the per-order cap (MAX_ORDER_VALUE) applies; set MAX_DAILY_VALUE to "
+            "- only the per-order cap (MAX_ORDER_VALUE) applies; set MAX_DAILY_VALUE to "
             "bound cumulative daily spend."
         )
 

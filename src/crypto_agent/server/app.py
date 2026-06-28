@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from trading_core.domain.models import OrderRequest, OrderSide, OrderType
 
+from ..config import daily_cap_off_while_live
 from .services import Services, build_services
 
 _services: Services | None = None
@@ -73,6 +74,9 @@ async def session_status() -> dict:
     configured `CRYPTO_TRADING_MODE`; it is NOT independently verified against the
     exchange. Real-money protection rests on the `CRYPTO_ALLOW_LIVE` gate, not on this
     field. There is no gateway/login here — either the keys authenticate or they don't.
+
+    Also reports `daily_cap_configured` (whether a cumulative daily spend cap is set) and,
+    when live trading is armed with no cap, a `daily_cap_warning` to relay to the user.
     """
     svc = services()
     try:
@@ -87,6 +91,11 @@ async def session_status() -> dict:
             status["warning"] = (
                 "LIVE crypto account — orders placed here move REAL money. "
                 "Confirm symbol, side and amount with the user before sending."
+            )
+        status["daily_cap_configured"] = svc.settings.max_daily_value is not None
+        if daily_cap_off_while_live(svc.settings):
+            status["daily_cap_warning"] = (
+                "No daily spend cap set (MAX_DAILY_VALUE) - only the per-order cap applies."
             )
         return _ok(status)
     except Exception as exc:  # noqa: BLE001
