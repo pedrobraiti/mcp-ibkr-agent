@@ -183,7 +183,7 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 
 ## Exposed tools
 
-`session_status`, `market_status`, `get_quote`, `get_quotes`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `stop_order`, `trailing_stop`, `bracket_order`, `order_status`, `wait_for_fill`, `cancel_order`, `open_orders`, `trade_history`.
+`session_status`, `market_status`, `get_quote`, `get_quotes`, `account_summary`, `positions`, `portfolio`, `preview_order`, `buy`, `sell`, `close_position`, `stop_order`, `trailing_stop`, `bracket_order`, `order_status`, `wait_for_fill`, `cancel_order`, `open_orders`, `trade_history`, `reconcile_pending`.
 
 - `get_quotes(symbols)` quotes a whole watchlist in **one** snapshot call (cheaper than one `get_quote` per symbol).
 - `preview_order(symbol, side, ...)` estimates an order's **margin impact, commission and warnings** via IBKR's `whatif` — **without sending it** — so the agent can reason about cost before committing.
@@ -196,6 +196,7 @@ If you log in and approve 2FA but **nothing happens** — the page just sits the
 - `order_status(order_id)` reports an order's state, **filled quantity** and average price — use it after `buy`/`sell` to confirm a fill (positions lag right after a trade). `wait_for_fill(order_id, timeout_seconds)` polls until it fills (or is cancelled/rejected), so the agent doesn't orchestrate the retry itself.
 - `portfolio()` returns a single snapshot: account summary + open positions + total unrealized P&L.
 - `trade_history(limit)` returns the audit log of recent order attempts (buys, sells, dry-runs, blocks) — answers "what did my agent do?".
+- `reconcile_pending(resolve_missing?)` reconciles **dispatched-but-unconfirmed** orders against IBKR's open orders. After a timeout/crash an order may have landed without its outcome journaled, so the safety layer blocks an identical resend until reconciled: orders found resting are marked resolved; ones not found stay blocked (resending blind could double them).
 
 ## Usage example
 

@@ -95,7 +95,7 @@ sequence is always: restart the gateway → then log in.
 
 ## Using Valet day to day
 
-These are **all 19 MCP tools** you have once the `ibkr` server is connected — your full
+These are **all 20 MCP tools** you have once the `ibkr` server is connected — your full
 capability surface. Every tool returns an `{"ok": bool, "data"/"error": ...}` envelope.
 
 **Session & market**
@@ -136,6 +136,10 @@ capability surface. Every tool returns an `{"ok": bool, "data"/"error": ...}` en
   rejected), so you don't orchestrate the retry yourself (timeout capped at 120s).
 - `open_orders` — active orders. `cancel_order(order_id)` — cancel one.
 - `trade_history(limit?)` — local audit log of every attempt (sent, dry-run, blocked).
+- `reconcile_pending(resolve_missing?)` — reconcile **dispatched-but-unconfirmed** orders against
+  IBKR's open orders. After a timeout/crash the safety layer blocks an identical resend until the
+  pending intent is reconciled; this clears it (resting orders → resolved; not-found → stay blocked,
+  since resending blind could double a fill).
 
 **Order types supported:** market, limit, stop, stop-limit, trailing-stop, and brackets —
 plus fractional **buys by dollar amount** (cashQty) and fractional sells by quantity.
@@ -174,7 +178,8 @@ and `ccxt` behind one interface.
 `positions`, `portfolio`, `buy` (`cash_amount` in the quote ccy via
 `createMarketBuyOrderWithCost`, **or** `quantity` in the base; market or LIMIT),
 `sell` (by `quantity`), `close_position` (sells 100% of the base balance),
-`order_status`, `cancel_order`, `open_orders`, `trade_history`. **Not** offered on crypto:
+`order_status`, `cancel_order`, `open_orders`, `trade_history`, `reconcile_pending` (clears the
+resend-block on a dispatched-but-unconfirmed order, same as IBKR). **Not** offered on crypto:
 brackets, stops, trailing stops, `preview_order` (no exchange whatif).
 
 ### Crypto safety specifics
